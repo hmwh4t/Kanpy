@@ -11,8 +11,12 @@ class workspace_manager:
 
     def _save_workspaces(self):
         """Saves the current state of available_workspaces to the JSON file."""
-        with open(self.workspaces_file, "w") as f:
-            json.dump(self.available_workspaces, f, indent=4)
+        try:
+            with open(self.workspaces_file, "w", encoding="utf-8") as f:
+                json.dump(self.available_workspaces, f, indent=4)
+        except IOError as e:
+            self._notify(f"Error saving workspaces file {self.workspaces_file}: {e}", use_gui=True)
+
 
     def _notify(self, message, use_gui=True):
         """Prints a message and optionally shows it in an easygui msgbox."""
@@ -32,11 +36,11 @@ class workspace_manager:
 
         if initial_file_exists:
             try:
-                with open(self.workspaces_file, "r") as f:
+                with open(self.workspaces_file, "r", encoding="utf-8") as f:
                     content = f.read()
                     if not content.strip(): # File is empty or only whitespace
                         self.available_workspaces = {}
-                        file_was_problematic = True 
+                        file_was_problematic = True
                     else:
                         loaded_data = json.loads(content)
                         if isinstance(loaded_data, dict):
@@ -54,7 +58,11 @@ class workspace_manager:
                 #     os.rename(self.workspaces_file, self.workspaces_file + f".corrupted_{int(time.time())}")
                 # except OSError as e_mv:
                 #     self._notify(f"Could not back up corrupted file: {e_mv}", use_gui=False)
-            except Exception as e: # Catch other potential IO errors
+            except IOError as e: # Catch other potential IO errors like permission issues
+                self.available_workspaces = {}
+                file_was_problematic = True
+                self._notify(f"An I/O error occurred while loading {self.workspaces_file}: {e}. Starting fresh.", use_gui=False)
+            except Exception as e: # Catch other unexpected errors
                 self.available_workspaces = {}
                 file_was_problematic = True
                 self._notify(f"An unexpected error occurred while loading {self.workspaces_file}: {e}. Starting fresh.", use_gui=False)
@@ -63,18 +71,20 @@ class workspace_manager:
 
         # Clean up entries with missing paths
         workspaces_cleaned = False
-        for name, path_val in list(self.available_workspaces.items()): # Iterate over a copy
-            if not os.path.exists(path_val):
-                del self.available_workspaces[name]
-                self._notify(f"Path for workspace '{name}' ('{path_val}') not found. Entry removed.", use_gui=True)
-                workspaces_cleaned = True
+        if self.available_workspaces: # Only iterate if there's something to clean
+            for name, path_val in list(self.available_workspaces.items()): # Iterate over a copy
+                if not isinstance(path_val, str) or not os.path.exists(path_val): # Also check if path_val is a string
+                    if name in self.available_workspaces: # Check if still exists, could be removed by other logic
+                        del self.available_workspaces[name]
+                    self._notify(f"Path for workspace '{name}' ('{str(path_val)}') not found or invalid. Entry removed.", use_gui=True)
+                    workspaces_cleaned = True
         
         # Save if:
         # 1. The file didn't exist initially (it's now created, possibly empty).
         # 2. Workspaces were cleaned from an existing file.
         # 3. An existing file was problematic (empty, corrupt, wrong format) and is now standardized (e.g. to {}).
         if not initial_file_exists or workspaces_cleaned or file_was_problematic:
-            self._save_workspaces()
+            self._save_workspaces() # This will handle its own error reporting if saving fails
             if not initial_file_exists and not self.available_workspaces and not workspaces_cleaned:
                 print(f"Initialized empty {self.workspaces_file}.")
             elif file_was_problematic and not self.available_workspaces and not workspaces_cleaned:
@@ -111,6 +121,9 @@ class workspace_manager:
             self._notify(f"Workspace '{name}' created successfully at '{workspace_path}'.")
         except OSError as e:
             self._notify(f"Error creating directory for workspace '{name}' at '{workspace_path}': {e}")
+        except Exception as e: # Catch any other unexpected error during workspace creation
+            self._notify(f"An unexpected error occurred during workspace creation: {e}")
+
 
     def open_workspace(self, name):
         # Placeholder for opening a workspace
@@ -127,24 +140,27 @@ def test():
     
     if wm.load_workspaces():
         print(f"Successfully loaded {len(wm.available_workspaces)} workspace(s).")
+        for ws_name, ws_path in wm.available_workspaces.items():
+            print(f"  - {ws_name}: {ws_path}")
     else:
         # load_workspaces handles specific file issue notifications.
         # This message indicates no usable workspaces are configured.
         print("No active workspaces found. You can create one using the prompts.")
     
     # Prompt for new workspace creation
-    name_input = easygui.enterbox(msg="Enter the name for the new workspace:", title="Create Workspace")
+    name_input = easygui.enterbox(msg="Enter the name for the new workspace (or press Cancel to skip):", title="Create Workspace")
     if name_input is None: # User pressed Cancel
-        print("Workspace creation cancelled by user (name input).")
-        return # Exit test function
-    
-    path_input = easygui.diropenbox(msg="Select the parent directory for the new workspace:", title="Create Workspace")
-    if path_input is None: # User pressed Cancel
-        print("Workspace creation cancelled by user (directory selection).")
-        return # Exit test function
-
-    # create_workspace method will handle validation and user notification for the inputs
-    wm.create_workspace(name_input, path_input)
+        print("Workspace creation skipped by user (name input).")
+    elif not name_input.strip():
+        print("Workspace name cannot be empty. Creation skipped.")
+    else:
+        path_input = easygui.diropenbox(msg="Select the parent directory for the new workspace:", title="Create Workspace")
+        if path_input is None: # User pressed Cancel
+            print("Workspace creation cancelled by user (directory selection).")
+        else:
+            # create_workspace method will handle validation and user notification for the inputs
+            wm.create_workspace(name_input, path_input)
 
 # To run the test:
-test()
+if __name__ == "__main__":
+    test()
