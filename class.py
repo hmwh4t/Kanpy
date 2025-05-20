@@ -29,7 +29,8 @@ class workspace_manager:
         Loads workspaces from the JSON file.
         Creates an empty file if it doesn't exist or if the existing one is invalid.
         Cleans up entries with missing paths.
-        Returns True if workspaces are available after loading and cleaning, False otherwise.
+        Returns the dictionary of available workspaces. An empty dictionary is
+        returned if no workspaces are found or if issues occurred.
         """
         initial_file_exists = os.path.exists(self.workspaces_file)
         file_was_problematic = False  # Flag for existing files that were empty, corrupt, or ill-formatted
@@ -45,6 +46,7 @@ class workspace_manager:
                         loaded_data = json.loads(content)
                         if isinstance(loaded_data, dict):
                             self.available_workspaces = loaded_data
+                            # Removed early return here to ensure cleanup always runs
                         else: # Valid JSON, but not a dictionary
                             self.available_workspaces = {}
                             file_was_problematic = True
@@ -74,92 +76,101 @@ class workspace_manager:
         if self.available_workspaces: # Only iterate if there's something to clean
             for name, path_val in list(self.available_workspaces.items()): # Iterate over a copy
                 if not isinstance(path_val, str) or not os.path.exists(path_val): # Also check if path_val is a string
-                    if name in self.available_workspaces: # Check if still exists, could be removed by other logic
+                    if name in self.available_workspaces: # Check if still exists
                         del self.available_workspaces[name]
                     self._notify(f"Path for workspace '{name}' ('{str(path_val)}') not found or invalid. Entry removed.", use_gui=True)
                     workspaces_cleaned = True
         
-        # Save if:
-        # 1. The file didn't exist initially (it's now created, possibly empty).
-        # 2. Workspaces were cleaned from an existing file.
-        # 3. An existing file was problematic (empty, corrupt, wrong format) and is now standardized (e.g. to {}).
         if not initial_file_exists or workspaces_cleaned or file_was_problematic:
-            self._save_workspaces() # This will handle its own error reporting if saving fails
+            self._save_workspaces() 
             if not initial_file_exists and not self.available_workspaces and not workspaces_cleaned:
                 print(f"Initialized empty {self.workspaces_file}.")
             elif file_was_problematic and not self.available_workspaces and not workspaces_cleaned:
                  print(f"Re-initialized {self.workspaces_file} as empty due to prior issues.")
             
-        return bool(self.available_workspaces)
+        return self.available_workspaces
 
     def create_workspace(self, name, parent_path):
-        """Creates a new workspace directory and adds it to the configuration."""
-        # Validate inputs
+        """
+        Creates a new workspace directory and adds it to the configuration.
+        Returns the name of the created workspace on success, None otherwise.
+        """
         if not name or not isinstance(name, str) or not name.strip():
             self._notify("Workspace name must be a non-empty string.")
-            return
+            return None
         name = name.strip()
 
         if not parent_path or not isinstance(parent_path, str) or not os.path.isdir(parent_path):
              self._notify("Parent path must be a valid existing directory.")
-             return
+             return None
 
         if name in self.available_workspaces:
             self._notify(f"A workspace named '{name}' already exists in configuration (path: '{self.available_workspaces[name]}').")
-            return
+            return None
 
         workspace_path = os.path.join(parent_path, name)
 
         if os.path.exists(workspace_path):
             self._notify(f"A file or directory already exists at '{workspace_path}'. Cannot create workspace.")
-            return
+            return None
         
         try:
             os.makedirs(workspace_path)
             self.available_workspaces[name] = workspace_path
             self._save_workspaces()
             self._notify(f"Workspace '{name}' created successfully at '{workspace_path}'.")
+            return name
         except OSError as e:
             self._notify(f"Error creating directory for workspace '{name}' at '{workspace_path}': {e}")
-        except Exception as e: # Catch any other unexpected error during workspace creation
+            return None
+        except Exception as e: 
             self._notify(f"An unexpected error occurred during workspace creation: {e}")
+            return None
 
 
     def open_workspace(self, name):
-        # Placeholder for opening a workspace
+        """
+        Placeholder for opening a workspace.
+        Returns the name of the workspace if found, None otherwise.
+        Actual opening logic (e.g., changing directory) is not implemented here.
+        """
         if name in self.available_workspaces:
             # Logic to open workspace, e.g., set self.current_workspace
             # os.chdir(self.available_workspaces[name]) or similar
             self._notify(f"Workspace '{name}' would be opened here (path: {self.available_workspaces[name]}).", use_gui=False)
+            return name
         else:
             self._notify(f"Workspace '{name}' not found in configuration.", use_gui=True)
+            return None
+
 
 
 def test():
     wm = workspace_manager()
+    print(wm.load_workspaces())
     
-    if wm.load_workspaces():
-        print(f"Successfully loaded {len(wm.available_workspaces)} workspace(s).")
-        for ws_name, ws_path in wm.available_workspaces.items():
-            print(f"  - {ws_name}: {ws_path}")
-    else:
-        # load_workspaces handles specific file issue notifications.
-        # This message indicates no usable workspaces are configured.
-        print("No active workspaces found. You can create one using the prompts.")
+    # if wm.load_workspaces():
+    #     print(f"Successfully loaded {len(wm.available_workspaces)} workspace(s).")
+    #     for ws_name, ws_path in wm.available_workspaces.items():
+    #         print(f"  - {ws_name}: {ws_path}")
+    # else:
+    #     # load_workspaces handles specific file issue notifications.
+    #     # This message indicates no usable workspaces are configured.
+    #     print("No active workspaces found. You can create one using the prompts.")
     
-    # Prompt for new workspace creation
-    name_input = easygui.enterbox(msg="Enter the name for the new workspace (or press Cancel to skip):", title="Create Workspace")
-    if name_input is None: # User pressed Cancel
-        print("Workspace creation skipped by user (name input).")
-    elif not name_input.strip():
-        print("Workspace name cannot be empty. Creation skipped.")
-    else:
-        path_input = easygui.diropenbox(msg="Select the parent directory for the new workspace:", title="Create Workspace")
-        if path_input is None: # User pressed Cancel
-            print("Workspace creation cancelled by user (directory selection).")
-        else:
-            # create_workspace method will handle validation and user notification for the inputs
-            wm.create_workspace(name_input, path_input)
+    # # Prompt for new workspace creation
+    # name_input = easygui.enterbox(msg="Enter the name for the new workspace (or press Cancel to skip):", title="Create Workspace")
+    # if name_input is None: # User pressed Cancel
+    #     print("Workspace creation skipped by user (name input).")
+    # elif not name_input.strip():
+    #     print("Workspace name cannot be empty. Creation skipped.")
+    # else:
+    #     path_input = easygui.diropenbox(msg="Select the parent directory for the new workspace:", title="Create Workspace")
+    #     if path_input is None: # User pressed Cancel
+    #         print("Workspace creation cancelled by user (directory selection).")
+    #     else:
+    #         # create_workspace method will handle validation and user notification for the inputs
+    #         wm.create_workspace(name_input, path_input)
 
 # To run the test:
 if __name__ == "__main__":
