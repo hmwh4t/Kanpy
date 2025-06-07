@@ -1,8 +1,4 @@
 {
-    "test": "/mnt/m-v-o/for learning/oop-app/workspaces/test",
-    "crazy": "/mnt/m-v-o/for learning/oop-app/workspaces/crazy",
-    "craztttt": "/mnt/m-v-o/for learning/oop-app/workspaces/craztttt",
-    "no": "/mnt/m-v-o/for learning/oop-app/workspaces/no",
-    "BasicTestWorkspace_20250605162117": "workspaces/BasicTestWorkspace_20250605162117",
-    "BasicTestWorkspace_20250605162245": "workspaces/BasicTestWorkspace_20250605162245"
+    "1": "workspaces/1",
+    "2": "workspaces/2"
 }
