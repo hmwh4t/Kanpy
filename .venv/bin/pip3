@@ -1,5 +1,5 @@
 #!/bin/sh
-'''exec' "/mnt/m-v-o/for learning/oop-app/.venv/bin/python" "$0" "$@"
+'''exec' "/mnt/m-v-o/for learning/oop-app/.venv/bin/python3" "$0" "$@"
 ' '''
 # -*- coding: utf-8 -*-
 import re
