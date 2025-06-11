@@ -57,6 +57,68 @@ class Board:
     @classmethod
     def from_dict(cls, data):
         return cls(name=data.get("name", "Default Board"))
+    
+
+
+#####
+    def create_list(self,new_list_name,new_description):
+        self.lists.append(List(new_list_name,new_description))
+    def change_name(self,new_name):
+        self.name=new_name
+class List:
+    """
+    List in a board. Containing cards. 
+    IMPORTANT: Correct me if i'm wrong but we don't need smth like workspace_instance right???
+    """
+    def change_description(self,new_description,name):
+        if new_description:
+            self.description=new_description
+            self.name=name
+    def __init__(self, name, description="There's no description= for this list"):
+        self.name=name
+        self.description=description
+        self.cards=[]
+    #def create_card(self, new_card_name="None", new_card_description=None):
+    #    self.cards.append(Card(new_card_name,new_card_description)        
+    def change_name(self,new_name):
+        if new_name:
+            self.name=new_name
+        else:
+            print("A list cannot have no name. Please enter a name")
+    def change_description(self,new_description):
+        if new_description:
+            self.description=new_description
+        else: #No description
+            self.description="There's no description for this list"
+    def change_card_name(self,new_card_name,renamed_card):
+        if not new_card_name:
+            print("A card cannot have no name. Please enter another name")
+        elif new_card_name in self.cards:
+            print("This name already exists. Please enter another name")
+        else:
+            renamed_card.name=new_card_name
+    def to_dict(self):
+        return {"list_name": self.name, "Description": self.description, "cards_count": len(self.cards), "cards": self.cards.to_dict()}#this is a bit stupid cuz i just realized that i can't save the board like how i'll save the lists
+    
+    @classmethod
+    def from_dict(cls, data):
+        return cls(name=data.get("list_name", "Description", "cards_count"))
+class Card:
+    def __init__(self,name, description="There's no description= for this list"):
+        self.name=name
+        self.description=description
+    
+    def change_description(self,new_description):
+        if new_description:
+            self.description=new_description
+    def to_dict(self):
+        return {"card_name": self.name, "card_description": self.description}
+    
+    @classmethod
+    def from_dict(cls, data):
+        return cls(name=data.get("card_name","card_description"))
+####
+
 
 class Workspace:
     """Represents a workspace with optional password protection."""
@@ -108,6 +170,37 @@ class Workspace:
             ws.board = Board.from_dict(data["board"])
         
         return ws
+    def create_board(self, board_name, parent_dir=current_workspace_dir):
+        """Create a new workspace."""
+        if not board_name or board_name in self.workspaces:
+            self._print(f"Invalid or duplicate workspace name: {board_name}")
+            return None
+        
+        board_path = os.path.join(parent_dir, board_name)
+        if os.path.exists(board_path):
+            self._print(f"Directory already exists: {board_path}")
+            return None
+        board_data_file_name=board_name+".data"
+        try:
+            os.makedirs(board_path, exist_ok=True)
+            
+            # Create board and save it
+            board = Board(board_name)
+            data_file = os.path.join(board_path, board_data_file_name)
+            
+            with open(data_file, "w") as f:
+                json.dump(board.to_dict(), f, indent=2)
+            
+            self.workspaces[board_name] = board_path
+            self._save_config()
+            
+            self._print(f"Created board: {board_name}")
+            return board
+            
+        except OSError as e:
+            self._print(f"Error creating board: {e}")
+            return None
+    
 
 class WorkspaceManager:
     """Manages multiple workspaces."""
@@ -345,6 +438,8 @@ def run_cli():
         print("5. Save workspace")
         print("6. Close workspace")
         print("7. Show workspace data")
+        #print("8. Create a new card")
+        #print("9. Check Board")
         print("0. Exit")
         
         choice = input("\nEnter choice: ").strip()
@@ -430,6 +525,11 @@ def run_cli():
         
         if choice != '0':
             input("\nPress Enter to continue...")
-
+'''
+        elif choice == '8':
+            print("Enter the name of the board")
+            board_new_name=input()
+            workspace.board.name=board_new_name
+'''
 if __name__ == "__main__":
     run_cli()
