@@ -1,4 +1,10 @@
+FINISHED:
 1.How do i update the time. Easy gui didn't mentioned this so i think there's something i straight forgot or something
 2.Do we need to create the board first for the get_board
 3.How do we save the password. With a json file?
+
+NEW:
+1.add archive
+2.deletion for workspace(password is required for this),board,list,card
+3.Mouse and Touchscreen(OPTIONAL) interactions 
 Maybe there will be more problems that will emerge so i'll updated this when needed
