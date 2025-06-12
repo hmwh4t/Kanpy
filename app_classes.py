@@ -1,6 +1,7 @@
 import os
 import json
 import datetime
+from typing import Optional, Dict, List as ListType
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -8,133 +9,219 @@ from cryptography.hazmat.backends import default_backend
 import base64
 
 # Configuration
+DEFAULT_WORKSPACES_DIR = "workspaces"
 CONFIG_FILE_NAME = "workspaces.json"
 WORKSPACE_DATA_FILE_NAME = "workspace.data"
-DEFAULT_WORKSPACES_DIR = "workspaces"
 MAX_PASSWORD_ATTEMPTS = 3
 SALT_SIZE = 16
 KDF_ITERATIONS = 100_000
 
-# Encryption utilities
-def _derive_key(password: str, salt: bytes) -> bytes:
-    """Derive encryption key from password and salt."""
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=KDF_ITERATIONS,
-        backend=default_backend()
-    )
-    return base64.urlsafe_b64encode(kdf.derive(password.encode('utf-8')))
-
-def _encrypt_data(data: str, password: str) -> bytes:
-    """Encrypt data with password."""
-    salt = os.urandom(SALT_SIZE)
-    key = _derive_key(password, salt)
-    encrypted = Fernet(key).encrypt(data.encode('utf-8'))
-    return salt + encrypted
-
-def _decrypt_data(encrypted_data: bytes, password: str) -> str:
-    """Decrypt data with password."""
-    if len(encrypted_data) <= SALT_SIZE:
-        raise ValueError("Invalid encrypted data")
+class EncryptionHelper:
+    """Handles encryption and decryption operations."""
     
-    salt = encrypted_data[:SALT_SIZE]
-    ciphertext = encrypted_data[SALT_SIZE:]
-    key = _derive_key(password, salt)
+    @staticmethod
+    def derive_key(password: str, salt: bytes) -> bytes:
+        """Derive encryption key from password and salt."""
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=KDF_ITERATIONS,
+            backend=default_backend()
+        )
+        return base64.urlsafe_b64encode(kdf.derive(password.encode('utf-8')))
     
-    return Fernet(key).decrypt(ciphertext).decode('utf-8')
+    @staticmethod
+    def encrypt(data: str, password: str) -> bytes:
+        """Encrypt data with password."""
+        salt = os.urandom(SALT_SIZE)
+        key = EncryptionHelper.derive_key(password, salt)
+        encrypted = Fernet(key).encrypt(data.encode('utf-8'))
+        return salt + encrypted
+    
+    @staticmethod
+    def decrypt(encrypted_data: bytes, password: str) -> str:
+        """Decrypt data with password."""
+        if len(encrypted_data) <= SALT_SIZE:
+            raise ValueError("Invalid encrypted data")
+        
+        salt = encrypted_data[:SALT_SIZE]
+        ciphertext = encrypted_data[SALT_SIZE:]
+        key = EncryptionHelper.derive_key(password, salt)
+        
+        return Fernet(key).decrypt(ciphertext).decode('utf-8')
+
+class Card:
+    """Represents a card in a list."""
+    
+    def __init__(self, name: str, description: str = "No description"):
+        self.name = name
+        self.description = description
+    
+    def update_description(self, new_description: str):
+        """Update card description."""
+        self.description = new_description if new_description else "No description"
+    
+    def to_dict(self) -> Dict:
+        """Convert card to dictionary."""
+        return {
+            "name": self.name,
+            "description": self.description
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'Card':
+        """Create card from dictionary."""
+        return cls(
+            name=data.get("name", "Unnamed Card"),
+            description=data.get("description", "No description")
+        )
+
+class TaskList:
+    """Represents a list containing cards."""
+    
+    def __init__(self, name: str, description: str = "No description"):
+        self.name = name
+        self.description = description
+        self.cards: ListType[Card] = []
+    
+    def add_card(self, name: str, description: str = "No description") -> Card:
+        """Add a new card to the list."""
+        if not name:
+            raise ValueError("Card name cannot be empty")
+        
+        # Check for duplicate names
+        if any(card.name == name for card in self.cards):
+            raise ValueError(f"Card '{name}' already exists")
+        
+        card = Card(name, description)
+        self.cards.append(card)
+        return card
+    
+    def remove_card(self, card_name: str) -> bool:
+        """Remove a card by name."""
+        for i, card in enumerate(self.cards):
+            if card.name == card_name:
+                self.cards.pop(i)
+                return True
+        return False
+    
+    def get_card(self, card_name: str) -> Optional[Card]:
+        """Get a card by name."""
+        for card in self.cards:
+            if card.name == card_name:
+                return card
+        return None
+    
+    def update_name(self, new_name: str):
+        """Update list name."""
+        if not new_name:
+            raise ValueError("List name cannot be empty")
+        self.name = new_name
+    
+    def update_description(self, new_description: str):
+        """Update list description."""
+        self.description = new_description if new_description else "No description"
+    
+    def to_dict(self) -> Dict:
+        """Convert list to dictionary."""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "cards": [card.to_dict() for card in self.cards]
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'TaskList':
+        """Create list from dictionary."""
+        task_list = cls(
+            name=data.get("name", "Unnamed List"),
+            description=data.get("description", "No description")
+        )
+        
+        # Load cards
+        for card_data in data.get("cards", []):
+            card = Card.from_dict(card_data)
+            task_list.cards.append(card)
+        
+        return task_list
 
 class Board:
-    """Simple board class for workspace."""
-    def __init__(self, name="Default Board"):
+    """Represents a board containing lists."""
+    
+    def __init__(self, name: str = "Default Board"):
         self.name = name
-        self.lists = []
+        self.lists: ListType[TaskList] = []
     
-    def to_dict(self):
-        return {"name": self.name, "lists_count": len(self.lists)}
+    def add_list(self, name: str, description: str = "No description") -> TaskList:
+        """Add a new list to the board."""
+        if not name:
+            raise ValueError("List name cannot be empty")
+        
+        # Check for duplicate names
+        if any(task_list.name == name for task_list in self.lists):
+            raise ValueError(f"List '{name}' already exists")
+        
+        task_list = TaskList(name, description)
+        self.lists.append(task_list)
+        return task_list
     
-    @classmethod
-    def from_dict(cls, data):
-        return cls(name=data.get("name", "Default Board"))
+    def remove_list(self, list_name: str) -> bool:
+        """Remove a list by name."""
+        for i, task_list in enumerate(self.lists):
+            if task_list.name == list_name:
+                self.lists.pop(i)
+                return True
+        return False
     
-
-
-#####
-    def create_list(self,new_list_name,new_description):
-        self.lists.append(List(new_list_name,new_description))
-    def change_name(self,new_name):
-        self.name=new_name
-class List:
-    """
-    List in a board. Containing cards. 
-    IMPORTANT: Correct me if i'm wrong but we don't need smth like workspace_instance right???
-    """
-    def change_description(self,new_description,name):
-        if new_description:
-            self.description=new_description
-            self.name=name
-    def __init__(self, name, description="There's no description= for this list"):
-        self.name=name
-        self.description=description
-        self.cards=[]
-    #def create_card(self, new_card_name="None", new_card_description=None):
-    #    self.cards.append(Card(new_card_name,new_card_description)        
-    def change_name(self,new_name):
-        if new_name:
-            self.name=new_name
-        else:
-            print("A list cannot have no name. Please enter a name")
-    def change_description(self,new_description):
-        if new_description:
-            self.description=new_description
-        else: #No description
-            self.description="There's no description for this list"
-    def change_card_name(self,new_card_name,renamed_card):
-        if not new_card_name:
-            print("A card cannot have no name. Please enter another name")
-        elif new_card_name in self.cards:
-            print("This name already exists. Please enter another name")
-        else:
-            renamed_card.name=new_card_name
-    def to_dict(self):
-        return {"list_name": self.name, "Description": self.description, "cards_count": len(self.cards), "cards": self.cards.to_dict()}#this is a bit stupid cuz i just realized that i can't save the board like how i'll save the lists
+    def get_list(self, list_name: str) -> Optional[TaskList]:
+        """Get a list by name."""
+        for task_list in self.lists:
+            if task_list.name == list_name:
+                return task_list
+        return None
+    
+    def update_name(self, new_name: str):
+        """Update board name."""
+        if not new_name:
+            raise ValueError("Board name cannot be empty")
+        self.name = new_name
+    
+    def to_dict(self) -> Dict:
+        """Convert board to dictionary."""
+        return {
+            "name": self.name,
+            "lists": [task_list.to_dict() for task_list in self.lists]
+        }
     
     @classmethod
-    def from_dict(cls, data):
-        return cls(name=data.get("list_name", "Description", "cards_count"))
-class Card:
-    def __init__(self,name, description="There's no description= for this list"):
-        self.name=name
-        self.description=description
-    
-    def change_description(self,new_description):
-        if new_description:
-            self.description=new_description
-    def to_dict(self):
-        return {"card_name": self.name, "card_description": self.description}
-    
-    @classmethod
-    def from_dict(cls, data):
-        return cls(name=data.get("card_name","card_description"))
-####
-
+    def from_dict(cls, data: Dict) -> 'Board':
+        """Create board from dictionary."""
+        board = cls(name=data.get("name", "Default Board"))
+        
+        # Load lists
+        for list_data in data.get("lists", []):
+            task_list = TaskList.from_dict(list_data)
+            board.lists.append(task_list)
+        
+        return board
 
 class Workspace:
     """Represents a workspace with optional password protection."""
-    def __init__(self, name, password=None):
+    
+    def __init__(self, name: str, password: Optional[str] = None):
         self.name = name
         self._password = password
         self.last_edited = datetime.datetime.now(datetime.timezone.utc)
         self.board = Board(f"{name}'s Board")
     
-    def check_password(self, password):
+    def check_password(self, password: Optional[str]) -> bool:
         """Check if password is correct."""
         if not self._password:
             return not password
         return self._password == password
     
-    def set_password(self, new_password, old_password=None):
+    def set_password(self, new_password: Optional[str], old_password: Optional[str] = None) -> bool:
         """Set or change workspace password."""
         if self._password and self._password != old_password:
             return False
@@ -143,7 +230,7 @@ class Workspace:
         self.last_edited = datetime.datetime.now(datetime.timezone.utc)
         return True
     
-    def to_dict(self):
+    def to_dict(self) -> Dict:
         """Convert workspace to dictionary."""
         return {
             "name": self.name,
@@ -153,117 +240,114 @@ class Workspace:
         }
     
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data: Dict) -> 'Workspace':
         """Create workspace from dictionary."""
-        ws = cls(data.get("name", "Unnamed"))
-        ws._password = data.get("password")
+        workspace = cls(data.get("name", "Unnamed"))
+        workspace._password = data.get("password")
         
         # Handle last_edited
         if data.get("last_edited"):
             try:
-                ws.last_edited = datetime.datetime.fromisoformat(data["last_edited"])
+                workspace.last_edited = datetime.datetime.fromisoformat(data["last_edited"])
             except ValueError:
                 pass  # Keep default time
         
         # Handle board
         if data.get("board"):
-            ws.board = Board.from_dict(data["board"])
+            workspace.board = Board.from_dict(data["board"])
         
-        return ws
+        return workspace
 
-    def create_board(self, board_name, parent_dir=None):
-        """Create a new workspace."""
-        if parent_dir is None:
-            parent_dir = DEFAULT_WORKSPACES_DIR
-        
-        if not board_name or board_name in self.workspaces:
-            self._print(f"Invalid or duplicate workspace name: {board_name}")
-            return None
-        
-        board_path = os.path.join(parent_dir, board_name)
-        if os.path.exists(board_path):
-            self._print(f"Directory already exists: {board_path}")
-            return None
-        board_data_file_name=board_name+".data"
-        try:
-            os.makedirs(board_path, exist_ok=True)
-            
-            # Create board and save it
-            board = Board(board_name)
-            data_file = os.path.join(board_path, board_data_file_name)
-            
-            with open(data_file, "w") as f:
-                json.dump(board.to_dict(), f, indent=2)
-            
-            self.workspaces[board_name] = board_path
-            self._save_config()
-            
-            self._print(f"Created board: {board_name}")
-            return board
-            
-        except OSError as e:
-            self._print(f"Error creating board: {e}")
-            return None
+class FileManager:
+    """Handles file operations for workspaces."""
     
+    @staticmethod
+    def load_json(file_path: str) -> Dict:
+        """Load JSON data from file."""
+        with open(file_path, "r") as f:
+            return json.load(f)
+    
+    @staticmethod
+    def save_json(data: Dict, file_path: str):
+        """Save JSON data to file."""
+        with open(file_path, "w") as f:
+            json.dump(data, f, indent=2)
+    
+    @staticmethod
+    def load_encrypted(file_path: str, password: str) -> Dict:
+        """Load encrypted data from file."""
+        with open(file_path, "rb") as f:
+            encrypted_data = f.read()
+        
+        decrypted_json = EncryptionHelper.decrypt(encrypted_data, password)
+        return json.loads(decrypted_json)
+    
+    @staticmethod
+    def save_encrypted(data: Dict, file_path: str, password: str):
+        """Save encrypted data to file."""
+        json_data = json.dumps(data, indent=2)
+        encrypted_data = EncryptionHelper.encrypt(json_data, password)
+        
+        with open(file_path, "wb") as f:
+            f.write(encrypted_data)
 
 class WorkspaceManager:
     """Manages multiple workspaces."""
-    def __init__(self):
+    
+    def __init__(self, workspaces_dir: str = DEFAULT_WORKSPACES_DIR):
+        self.workspaces_dir = workspaces_dir
         self.config_file = CONFIG_FILE_NAME
-        self.workspaces = {}  # name -> path mapping
-        self.current_workspace = None
+        self.workspaces: Dict[str, str] = {}  # name -> path mapping
+        self.current_workspace: Optional[Workspace] = None
+        
+        # Ensure workspaces directory exists
+        os.makedirs(self.workspaces_dir, exist_ok=True)
     
-    def _print(self, message):
-        """Print message to console."""
-        print(message)
-    
-    def _save_config(self):
-        """Save workspace configuration to file."""
-        try:
-            with open(self.config_file, "w") as f:
-                json.dump(self.workspaces, f, indent=2)
-        except IOError as e:
-            self._print(f"Error saving config: {e}")
-    
-    def load_workspaces(self):
+    def load_config(self):
         """Load workspace configuration from file."""
         if not os.path.exists(self.config_file):
             self.workspaces = {}
-            self._print(f"No config file found. Creating {self.config_file}")
-            self._save_config()
+            self.save_config()
             return
         
         try:
-            with open(self.config_file, "r") as f:
-                self.workspaces = json.load(f)
-            
-            # Clean up invalid entries
-            valid_workspaces = {}
-            for name, path in self.workspaces.items():
-                data_file = os.path.join(path, WORKSPACE_DATA_FILE_NAME)
-                if os.path.isdir(path) and os.path.exists(data_file):
-                    valid_workspaces[name] = path
-                else:
-                    self._print(f"Removing invalid workspace: {name}")
-            
-            if len(valid_workspaces) != len(self.workspaces):
-                self.workspaces = valid_workspaces
-                self._save_config()
-                
+            self.workspaces = FileManager.load_json(self.config_file)
+            self._clean_invalid_workspaces()
         except (json.JSONDecodeError, IOError) as e:
-            self._print(f"Error loading config: {e}. Starting fresh.")
+            print(f"Error loading config: {e}. Starting fresh.")
             self.workspaces = {}
-            self._save_config()
+            self.save_config()
     
-    def create_workspace(self, name, parent_dir=DEFAULT_WORKSPACES_DIR):
+    def save_config(self):
+        """Save workspace configuration to file."""
+        try:
+            FileManager.save_json(self.workspaces, self.config_file)
+        except IOError as e:
+            print(f"Error saving config: {e}")
+    
+    def _clean_invalid_workspaces(self):
+        """Remove invalid workspace entries from config."""
+        valid_workspaces = {}
+        for name, path in self.workspaces.items():
+            data_file = os.path.join(path, WORKSPACE_DATA_FILE_NAME)
+            if os.path.isdir(path) and os.path.exists(data_file):
+                valid_workspaces[name] = path
+            else:
+                print(f"Removing invalid workspace: {name}")
+        
+        if len(valid_workspaces) != len(self.workspaces):
+            self.workspaces = valid_workspaces
+            self.save_config()
+    
+    def create_workspace(self, name: str) -> Optional[Workspace]:
         """Create a new workspace."""
         if not name or name in self.workspaces:
-            self._print(f"Invalid or duplicate workspace name: {name}")
+            print(f"Invalid or duplicate workspace name: {name}")
             return None
         
-        workspace_path = os.path.join(parent_dir, name)
+        workspace_path = os.path.join(self.workspaces_dir, name)
         if os.path.exists(workspace_path):
-            self._print(f"Directory already exists: {workspace_path}")
+            print(f"Directory already exists: {workspace_path}")
             return None
         
         try:
@@ -273,39 +357,27 @@ class WorkspaceManager:
             workspace = Workspace(name)
             data_file = os.path.join(workspace_path, WORKSPACE_DATA_FILE_NAME)
             
-            with open(data_file, "w") as f:
-                json.dump(workspace.to_dict(), f, indent=2)
+            FileManager.save_json(workspace.to_dict(), data_file)
             
             self.workspaces[name] = workspace_path
-            self._save_config()
+            self.save_config()
             
-            self._print(f"Created workspace: {name}")
+            print(f"Created workspace: {name}")
             return workspace
             
         except OSError as e:
-            self._print(f"Error creating workspace: {e}")
+            print(f"Error creating workspace: {e}")
             return None
     
-    def _load_workspace_data(self, workspace_path):
-        """Load workspace data from file (plain or encrypted)."""
-        data_file = os.path.join(workspace_path, WORKSPACE_DATA_FILE_NAME)
-        
-        # Try plain JSON first
+    def _is_encrypted_file(self, file_path: str) -> bool:
+        """Check if file contains encrypted data."""
         try:
-            with open(data_file, "r") as f:
-                return json.load(f), False  # data, is_encrypted
+            FileManager.load_json(file_path)
+            return False
         except (json.JSONDecodeError, UnicodeDecodeError):
-            pass
-        
-        # Try encrypted
-        try:
-            with open(data_file, "rb") as f:
-                encrypted_data = f.read()
-            return encrypted_data, True  # encrypted_bytes, is_encrypted
-        except IOError as e:
-            raise Exception(f"Cannot read workspace data: {e}")
+            return True
     
-    def _prompt_password(self, prompt_text):
+    def _prompt_password(self, prompt_text: str) -> Optional[str]:
         """Prompt for password with retry logic."""
         for attempt in range(MAX_PASSWORD_ATTEMPTS):
             password = input(f"{prompt_text} (attempt {attempt + 1}/{MAX_PASSWORD_ATTEMPTS}, 'CANCEL' to abort): ").strip()
@@ -313,63 +385,60 @@ class WorkspaceManager:
             if password == "CANCEL":
                 return None
             
-            if password:  # Non-empty password
+            if password:
                 return password
             
-            self._print("Password cannot be empty")
+            print("Password cannot be empty")
         
-        self._print("Maximum attempts reached")
+        print("Maximum attempts reached")
         return None
     
-    def open_workspace(self, name):
+    def open_workspace(self, name: str) -> Optional[Workspace]:
         """Open a workspace by name."""
         if name not in self.workspaces:
-            self._print(f"Workspace not found: {name}")
+            print(f"Workspace not found: {name}")
             return None
         
         workspace_path = self.workspaces[name]
+        data_file = os.path.join(workspace_path, WORKSPACE_DATA_FILE_NAME)
         
         try:
-            data, is_encrypted = self._load_workspace_data(workspace_path)
+            is_encrypted = self._is_encrypted_file(data_file)
             
             if is_encrypted:
-                # Decrypt the data
                 password = self._prompt_password(f"Enter password for '{name}'")
                 if not password:
                     return None
                 
                 try:
-                    decrypted_json = _decrypt_data(data, password)
-                    workspace_data = json.loads(decrypted_json)
+                    workspace_data = FileManager.load_encrypted(data_file, password)
                     workspace = Workspace.from_dict(workspace_data)
-                    workspace._password = password  # Store the password
-                    
+                    workspace._password = password
                 except InvalidToken:
-                    self._print("Incorrect password or corrupted file")
+                    print("Incorrect password or corrupted file")
                     return None
             else:
-                # Plain JSON data
-                workspace = Workspace.from_dict(data)
+                workspace_data = FileManager.load_json(data_file)
+                workspace = Workspace.from_dict(workspace_data)
                 
-                # Check if workspace requires password
                 if workspace._password:
                     password = self._prompt_password(f"Enter password for '{name}'")
                     if not password or not workspace.check_password(password):
-                        self._print("Incorrect password")
+                        print("Incorrect password")
                         return None
             
             self.current_workspace = workspace
-            self._print(f"Opened workspace: {name}")
+            print(f"Opened workspace: {name}")
             return workspace
             
         except Exception as e:
-            self._print(f"Error opening workspace: {e}")
+            print(f"Error opening workspace: {e}")
             return None
     
-    def save_current_workspace(self):
+    def save_current_workspace(self) -> bool:
         """Save the current workspace to file."""
         if not self.current_workspace:
-            self._print("No workspace to save")
+            print("No workspace to save")
             return False
         
         workspace = self.current_workspace
@@ -380,34 +449,29 @@ class WorkspaceManager:
             workspace_data = workspace.to_dict()
             
             if workspace._password:
-                # Save encrypted
-                json_data = json.dumps(workspace_data, indent=2)
-                encrypted_data = _encrypt_data(json_data, workspace._password)
-                
-                with open(data_file, "wb") as f:
-                    f.write(encrypted_data)
-                
-                self._print(f"Saved workspace (encrypted): {workspace.name}")
+                FileManager.save_encrypted(workspace_data, data_file, workspace._password)
+                print(f"Saved workspace (encrypted): {workspace.name}")
             else:
-                # Save as plain JSON
-                with open(data_file, "w") as f:
-                    json.dump(workspace_data, f, indent=2)
-                
-                self._print(f"Saved workspace (plain): {workspace.name}")
+                FileManager.save_json(workspace_data, data_file)
+                print(f"Saved workspace (plain): {workspace.name}")
             
             return True
             
         except Exception as e:
-            self._print(f"Error saving workspace: {e}")
+            print(f"Error saving workspace: {e}")
             return False
     
     def close_current_workspace(self):
         """Close the current workspace."""
         if self.current_workspace:
-            self._print(f"Closed workspace: {self.current_workspace.name}")
+            print(f"Closed workspace: {self.current_workspace.name}")
             self.current_workspace = None
         else:
-            self._print("No workspace to close")
+            print("No workspace to close")
+    
+    def list_workspaces(self) -> ListType[str]:
+        """Get list of available workspace names."""
+        return list(self.workspaces.keys())
 
 def clear_screen():
     """Clear terminal screen."""
@@ -416,13 +480,12 @@ def clear_screen():
 def run_cli():
     """Run the interactive CLI."""
     manager = WorkspaceManager()
-    os.makedirs(DEFAULT_WORKSPACES_DIR, exist_ok=True)
     
     print("Welcome to Workspace Manager!")
     print(f"Workspaces directory: ./{DEFAULT_WORKSPACES_DIR}/")
     input("Press Enter to continue...")
     
-    manager.load_workspaces()
+    manager.load_config()
     
     while True:
         clear_screen()
@@ -442,37 +505,36 @@ def run_cli():
         print("5. Save workspace")
         print("6. Close workspace")
         print("7. Show workspace data")
-        #print("8. Create a new card")
-        #print("9. Check Board")
         print("0. Exit")
         
         choice = input("\nEnter choice: ").strip()
         
         if choice == '1':
-            if manager.workspaces:
+            workspaces = manager.list_workspaces()
+            if workspaces:
                 print("\nAvailable workspaces:")
-                for name, path in manager.workspaces.items():
-                    print(f"  - {name} ({path})")
+                for name in workspaces:
+                    print(f"  - {name}")
             else:
                 print("No workspaces available")
         
         elif choice == '2':
-            if not manager.workspaces:
+            workspaces = manager.list_workspaces()
+            if not workspaces:
                 print("No workspaces available")
             else:
                 print("\nWorkspaces:")
-                names = list(manager.workspaces.keys())
-                for i, name in enumerate(names, 1):
+                for i, name in enumerate(workspaces, 1):
                     print(f"  {i}. {name}")
                 
                 selection = input("\nEnter name or number: ").strip()
                 
                 if selection.isdigit():
                     idx = int(selection) - 1
-                    if 0 <= idx < len(names):
-                        selection = names[idx]
+                    if 0 <= idx < len(workspaces):
+                        selection = workspaces[idx]
                 
-                if selection in manager.workspaces:
+                if selection in workspaces:
                     if manager.current_workspace:
                         manager.close_current_workspace()
                     manager.open_workspace(selection)
@@ -529,11 +591,6 @@ def run_cli():
         
         if choice != '0':
             input("\nPress Enter to continue...")
-'''
-        elif choice == '8':
-            print("Enter the name of the board")
-            board_new_name=input()
-            workspace.board.name=board_new_name
-'''
+
 if __name__ == "__main__":
     run_cli()
