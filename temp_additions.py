@@ -97,35 +97,3 @@ class Card:
     @classmethod
     def from_dict(cls, data):
         return cls(name=data.get("card_name","card_description"))
-class Workspace:
-    def create_board(self, board_name, parent_dir=current_workspace_dir):
-        """Create a new workspace."""
-        if not board_name or board_name in self.workspaces:
-            self._print(f"Invalid or duplicate workspace name: {board_name}")
-            return None
-        
-        board_path = os.path.join(parent_dir, board_name)
-        if os.path.exists(board_path):
-            self._print(f"Directory already exists: {board_path}")
-            return None
-        board_data_file_name=board_name+".data"
-        try:
-            os.makedirs(board_path, exist_ok=True)
-            
-            # Create board and save it
-            board = Board(board_name)
-            data_file = os.path.join(board_path, board_data_file_name)
-            
-            with open(data_file, "w") as f:
-                json.dump(board.to_dict(), f, indent=2)
-            
-            self.workspaces[board_name] = board_path
-            self._save_config()
-            
-            self._print(f"Created board: {board_name}")
-            return board
-            
-        except OSError as e:
-            self._print(f"Error creating board: {e}")
-            return None
-    #testing
