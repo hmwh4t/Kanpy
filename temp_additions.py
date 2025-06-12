@@ -97,3 +97,4 @@ class Card:
     @classmethod
     def from_dict(cls, data):
         return cls(name=data.get("card_name","card_description"))
+    #testing
