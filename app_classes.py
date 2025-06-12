@@ -170,8 +170,12 @@ class Workspace:
             ws.board = Board.from_dict(data["board"])
         
         return ws
-    def create_board(self, board_name, parent_dir=current_workspace_dir):
+
+    def create_board(self, board_name, parent_dir=None):
         """Create a new workspace."""
+        if parent_dir is None:
+            parent_dir = DEFAULT_WORKSPACES_DIR
+        
         if not board_name or board_name in self.workspaces:
             self._print(f"Invalid or duplicate workspace name: {board_name}")
             return None
