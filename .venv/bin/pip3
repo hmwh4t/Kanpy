@@ -1,6 +1,4 @@
-#!/bin/sh
-'''exec' "/mnt/m-v-o/for learning/oop-app/.venv/bin/python" "$0" "$@"
-' '''
+#!/home/hm/oop-app/.venv/bin/python3.11
 # -*- coding: utf-8 -*-
 import re
 import sys

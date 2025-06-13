@@ -6,7 +6,7 @@ cffi==1.17.1
 charset-normalizer==3.4.2
 colorama==0.4.6
 cryptography==45.0.3
-Cython==3.1.2
+Cython==0.29.33
 distlib==0.3.9
 docutils==0.21.2
 filelock==3.18.0
