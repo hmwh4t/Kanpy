@@ -1,47 +1,65 @@
-import os
-import json
-import datetime
+# main.py
+# ---------------------------------------------------------------
+# A minimal Trello-like “workspace” app with optional encryption.
+# ---------------------------------------------------------------
+
 import base64
+import datetime
+import json
+import os
 import shutil
+from functools import partial
+
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.backends import default_backend
 
-# --- Your Backend Code (with minor adjustments for GUI integration) ---
-# I've moved the print statements to be returned as status messages
-# so the GUI can display them in popups.
+from kivy.app import App
+from kivy.clock import Clock
+from kivy.lang import Builder
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.label import Label
+from kivy.uix.popup import Popup
+from kivy.uix.screenmanager import Screen, ScreenManager
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
 
-# --- Configuration ---
+# --- Configuration ----------------------------------------------------------
+
 DEFAULT_WORKSPACES_DIR = "workspaces"
 CONFIG_FILE_NAME = "workspaces.json"
 DATA_FILE_NAME = "data.json"
 SALT_SIZE = 16
+
+# --- Encryption helper ------------------------------------------------------
 
 
 class EncryptionHelper:
     """Handles encryption and decryption operations using Fernet."""
 
     @staticmethod
-    def derive_key(password, salt):
+    def derive_key(password: str, salt: bytes) -> bytes:
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
             salt=salt,
-            iterations=100000,
+            iterations=100_000,
             backend=default_backend(),
         )
         return base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
 
     @staticmethod
-    def encrypt(data_str, password):
+    def encrypt(data_str: str, password: str) -> bytes:
         salt = os.urandom(SALT_SIZE)
         key = EncryptionHelper.derive_key(password, salt)
         encrypted = Fernet(key).encrypt(data_str.encode("utf-8"))
         return salt + encrypted
 
     @staticmethod
-    def decrypt(encrypted_data, password):
+    def decrypt(encrypted_data: bytes, password: str) -> str:
         if len(encrypted_data) <= SALT_SIZE:
             raise ValueError("Invalid encrypted data: too short for salt.")
         salt = encrypted_data[:SALT_SIZE]
@@ -50,10 +68,11 @@ class EncryptionHelper:
         return Fernet(key).decrypt(ciphertext).decode("utf-8")
 
 
-class Board:
-    """A simple data container for a board's state."""
+# --- Basic data containers --------------------------------------------------
 
-    def __init__(self, name="Default Board", lists=None):
+
+class Board:
+    def __init__(self, name: str = "Default Board", lists=None):
         self.name = name
         self.lists = lists if lists is not None else []
 
@@ -61,26 +80,29 @@ class Board:
         return {"name": self.name, "lists": self.lists}
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data: dict):
         return cls(name=data.get("name"), lists=data.get("lists", []))
 
 
 class Workspace:
-    """Represents a workspace, containing a board and its metadata."""
-
-    def __init__(self, name, password=None, path=None):
+    def __init__(self, name: str, password: str | None = None, path: str | None = None):
         self.name = name
         self.path = path
         self._password = password
         self.last_edited = datetime.datetime.now().astimezone()
         self.board = Board(name=f"{name} Board")
 
-    def set_password(self, new_password):
+    # ---- password handling --------------------------------------------------
+
+    def set_password(self, new_password: str | None):
         self._password = new_password.strip() if new_password else None
         return (
-            f"Password has been {'set' if self._password else 'cleared'} for this session. "
-            "Save the workspace to apply the change permanently."
+            f"Password has been {'set' if self._password else 'cleared'} "
+            "for this session. Save the workspace to apply the change "
+            "permanently."
         )
+
+    # ---- (de)serialization --------------------------------------------------
 
     def to_dict(self):
         return {
@@ -90,7 +112,7 @@ class Workspace:
         }
 
     @classmethod
-    def from_dict(cls, data, path):
+    def from_dict(cls, data: dict, path: str):
         workspace = cls(name=data.get("name", "Unnamed"), path=path)
         if last_edited_str := data.get("last_edited"):
             try:
@@ -104,51 +126,55 @@ class Workspace:
         return workspace
 
 
-class WorkspaceManager:
-    """The main controller for creating, opening, and saving workspaces."""
+# --- Workspace manager ------------------------------------------------------
 
-    def __init__(
-        self,
-        config_path=CONFIG_FILE_NAME,
-        workspaces_dir=DEFAULT_WORKSPACES_DIR,
-    ):
+
+class WorkspaceManager:
+    """Main controller for creating, opening, and saving workspaces."""
+
+    def __init__(self, config_path: str, workspaces_dir: str):
         self.workspaces_dir = workspaces_dir
         self.config_path = config_path
-        self.workspaces = {}
-        self.current_workspace = None
+        self.workspaces: dict[str, str] = {}
+        self.current_workspace: Workspace | None = None
+
         os.makedirs(self.workspaces_dir, exist_ok=True)
         self._load_master_config()
+
+    # ---- master config helpers ---------------------------------------------
 
     def _load_master_config(self):
         if not os.path.exists(self.config_path):
             self.workspaces = {}
             return
         try:
-            with open(self.config_path, "r") as f:
-                self.workspaces = json.load(f)
+            with open(self.config_path, "r", encoding="utf-8") as fp:
+                self.workspaces = json.load(fp)
             self._clean_invalid_workspaces()
         except (IOError, json.JSONDecodeError):
             self.workspaces = {}
 
     def _save_master_config(self):
         try:
-            with open(self.config_path, "w") as f:
-                json.dump(self.workspaces, f, indent=2)
-        except IOError as e:
-            print(f"Error: Could not save master config: {e}")
+            with open(self.config_path, "w", encoding="utf-8") as fp:
+                json.dump(self.workspaces, fp, indent=2)
+        except IOError as err:
+            print(f"Error: Could not save master config: {err}")
 
     def _clean_invalid_workspaces(self):
-        initial_count = len(self.workspaces)
+        initial = len(self.workspaces)
         self.workspaces = {
             name: path
             for name, path in self.workspaces.items()
             if os.path.isdir(path)
             and os.path.exists(os.path.join(path, DATA_FILE_NAME))
         }
-        if len(self.workspaces) != initial_count:
+        if len(self.workspaces) != initial:
             self._save_master_config()
 
-    def create_workspace(self, name):
+    # ---- create / open / save / close --------------------------------------
+
+    def create_workspace(self, name: str):
         if not name or name in self.workspaces:
             return None, f"Error: Invalid or duplicate workspace name '{name}'."
 
@@ -158,48 +184,49 @@ class WorkspaceManager:
 
         try:
             os.makedirs(path)
-            workspace = Workspace(name, path=path)
-            self.current_workspace = workspace
+            ws = Workspace(name, path=path)
+            self.current_workspace = ws
             self.save_current_workspace()
 
             self.workspaces[name] = path
             self._save_master_config()
-            return workspace, f"Successfully created and opened workspace: {name}"
-        except OSError as e:
-            return None, f"Error creating workspace: {e}"
+            return ws, f"Successfully created and opened workspace: {name}"
+        except OSError as err:
+            return None, f"Error creating workspace: {err}"
 
-    def is_workspace_encrypted(self, name):
-        """Check if a workspace file is likely encrypted without reading it."""
+    # -------- encryption probe ----------------------------------------------
+
+    def is_workspace_encrypted(self, name: str) -> bool:
         if name not in self.workspaces:
             return False
-        path = self.workspaces[name]
-        data_path = os.path.join(path, DATA_FILE_NAME)
+        data_path = os.path.join(self.workspaces[name], DATA_FILE_NAME)
         try:
-            with open(data_path, "rb") as f:
-                # Try to decode the first few bytes as JSON. If it fails, it's likely binary/encrypted.
-                json.loads(f.read(1024).decode("utf-8"))
+            with open(data_path, "rb") as fp:
+                json.loads(fp.read(1024).decode("utf-8"))
             return False
         except (UnicodeDecodeError, json.JSONDecodeError):
             return True
-        except (IOError):
+        except IOError:
             return False
 
-    def open_workspace(self, name, password=None):
-        """Opens a workspace, using the provided password if necessary."""
+    # -------- open -----------------------------------------------------------
+
+    def open_workspace(self, name: str, password: str | None = None):
         if self.current_workspace:
             return (
                 None,
-                f"Please close the current workspace ('{self.current_workspace.name}') first.",
+                f"Please close the current workspace "
+                f"('{self.current_workspace.name}') first.",
             )
+
         if name not in self.workspaces:
             return None, f"Error: Workspace '{name}' not found."
 
-        path = self.workspaces[name]
-        data_path = os.path.join(path, DATA_FILE_NAME)
+        data_path = os.path.join(self.workspaces[name], DATA_FILE_NAME)
 
         try:
-            with open(data_path, "rb") as f:
-                file_content = f.read()
+            with open(data_path, "rb") as fp:
+                raw = fp.read()
 
             is_encrypted = self.is_workspace_encrypted(name)
             if is_encrypted and not password:
@@ -209,21 +236,23 @@ class WorkspaceManager:
                 )
 
             data_str = (
-                EncryptionHelper.decrypt(file_content, password)
+                EncryptionHelper.decrypt(raw, password)
                 if is_encrypted
-                else file_content.decode("utf-8")
+                else raw.decode("utf-8")
             )
-            workspace_data = json.loads(data_str)
+            ws_data = json.loads(data_str)
 
-            workspace = Workspace.from_dict(workspace_data, path)
-            workspace._password = password
-            self.current_workspace = workspace
-            return workspace, f"Successfully opened workspace: {name}"
+            ws = Workspace.from_dict(ws_data, self.workspaces[name])
+            ws._password = password
+            self.current_workspace = ws
+            return ws, f"Successfully opened workspace: {name}"
 
         except InvalidToken:
             return None, "Error: Incorrect password or corrupted data file."
-        except (IOError, json.JSONDecodeError, ValueError) as e:
-            return None, f"Error opening workspace '{name}': {e}"
+        except (IOError, json.JSONDecodeError, ValueError) as err:
+            return None, f"Error opening workspace '{name}': {err}"
+
+    # -------- save -----------------------------------------------------------
 
     def save_current_workspace(self):
         if not self.current_workspace:
@@ -231,20 +260,23 @@ class WorkspaceManager:
 
         ws = self.current_workspace
         ws.last_edited = datetime.datetime.now(datetime.timezone.utc)
+
         data_path = os.path.join(ws.path, DATA_FILE_NAME)
         json_data = json.dumps(ws.to_dict(), indent=2)
 
         try:
             if ws._password:
-                encrypted_data = EncryptionHelper.encrypt(json_data, ws._password)
-                with open(data_path, "wb") as f:
-                    f.write(encrypted_data)
+                enc = EncryptionHelper.encrypt(json_data, ws._password)
+                with open(data_path, "wb") as fp:
+                    fp.write(enc)
             else:
-                with open(data_path, "w", encoding="utf-8") as f:
-                    f.write(json_data)
+                with open(data_path, "w", encoding="utf-8") as fp:
+                    fp.write(json_data)
             return f"Workspace '{ws.name}' saved successfully."
-        except IOError as e:
-            return f"Error saving workspace: {e}"
+        except IOError as err:
+            return f"Error saving workspace: {err}"
+
+    # -------- close ----------------------------------------------------------
 
     def close_current_workspace(self):
         if not self.current_workspace:
@@ -253,28 +285,16 @@ class WorkspaceManager:
         self.current_workspace = None
         return f"Workspace '{name}' has been closed."
 
+    # -------- convenience ----------------------------------------------------
+
     def list_workspaces(self):
         return list(self.workspaces.keys())
 
 
-# --- Kivy Frontend App ---
+# --- Kivy UI ----------------------------------------------------------------
 
-from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.gridlayout import GridLayout
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.screenmanager import ScreenManager, Screen
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.popup import Popup
-from kivy.lang import Builder
-from kivy.clock import Clock
-from functools import partial
-
-# Kivy Language string for UI layout
 KV = """
-<WorkspaceButton@Button>:
+<WorkspaceButton>:
     size_hint_y: None
     height: '48dp'
 
@@ -390,6 +410,11 @@ class WorkspaceScreen(Screen):
     pass
 
 
+class WorkspaceButton(Button):
+    """Real Python subclass so we can instantiate it from code."""
+    pass
+
+
 class StatusPopup(Popup):
     pass
 
@@ -397,18 +422,21 @@ class StatusPopup(Popup):
 class InputDialog(Popup):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.ids.confirm_button.bind(on_press=self.on_confirm)
+        self.ids.confirm_button.bind(on_press=self._on_confirm)
         self.callback = None
 
-    def on_confirm(self, instance):
+    def _on_confirm(self, _instance):
         if self.callback:
             self.callback(self.ids.text_input.text)
         self.dismiss()
 
 
+# --- Application ------------------------------------------------------------
+
+
 class WorkspaceApp(App):
     def build(self):
-        # --- Android-Safe File Paths ---
+        # Use app-specific directory on mobile / desktop
         self.user_dir = self.user_data_dir
         workspaces_dir = os.path.join(self.user_dir, DEFAULT_WORKSPACES_DIR)
         config_path = os.path.join(self.user_dir, CONFIG_FILE_NAME)
@@ -419,34 +447,41 @@ class WorkspaceApp(App):
         self.sm = Builder.load_string(KV)
         return self.sm
 
-    def on_start(self):
-        self.populate_workspaces()
+    # ---------- helpers ------------------------------------------------------
 
-    def show_status(self, message):
+    def show_status(self, message: str):
         popup = StatusPopup()
         popup.ids.status_message.text = message
         popup.open()
 
-    def populate_workspaces(self):
-        ws_list_layout = self.sm.get_screen("main").ids.workspace_list
-        ws_list_layout.clear_widgets()
-        workspaces = self.manager.list_workspaces()
-        if not workspaces:
-            ws_list_layout.add_widget(
-                Label(text="No workspaces found. Create one!")
-            )
-        for name in workspaces:
+    # ---------- main screen --------------------------------------------------
+
+    def on_start(self):
+        self.populate_workspaces()
+
+    def populate_workspaces(self, *_):
+        layout = self.sm.get_screen("main").ids.workspace_list
+        layout.clear_widgets()
+
+        names = self.manager.list_workspaces()
+        if not names:
+            layout.add_widget(Label(text="No workspaces found. Create one!"))
+            return
+
+        for name in names:
             btn = WorkspaceButton(text=name)
-            btn.bind(on_press=partial(self.try_open_workspace, name))
-            ws_list_layout.add_widget(btn)
+            btn.bind(on_press=partial(self._maybe_open_workspace, name))
+            layout.add_widget(btn)
+
+    # ---------- create -------------------------------------------------------
 
     def show_create_workspace_dialog(self):
-        dialog = InputDialog(title="Create Workspace")
-        dialog.ids.prompt_label.text = "Enter new workspace name:"
-        dialog.callback = self.create_workspace
-        dialog.open()
+        dlg = InputDialog(title="Create Workspace")
+        dlg.ids.prompt_label.text = "Enter new workspace name:"
+        dlg.callback = self._create_workspace
+        dlg.open()
 
-    def create_workspace(self, name):
+    def _create_workspace(self, name: str):
         if not name:
             self.show_status("Workspace name cannot be empty.")
             return
@@ -454,63 +489,65 @@ class WorkspaceApp(App):
         self.show_status(msg)
         if ws:
             self.populate_workspaces()
-            self.go_to_workspace_screen()
+            self._go_to_workspace_screen()
 
-    def try_open_workspace(self, name, instance=None):
+    # ---------- open ---------------------------------------------------------
+
+    def _maybe_open_workspace(self, name: str, _instance):
         if self.manager.is_workspace_encrypted(name):
-            dialog = InputDialog(title=f"Open '{name}'")
-            dialog.ids.prompt_label.text = "Enter password:"
-            dialog.ids.text_input.password = True
-            dialog.callback = lambda password: self.open_workspace(
-                name, password
-            )
-            dialog.open()
+            dlg = InputDialog(title=f"Open '{name}'")
+            dlg.ids.prompt_label.text = "Enter password:"
+            dlg.ids.text_input.password = True
+            dlg.callback = lambda pwd: self._open_workspace(name, pwd)
+            dlg.open()
         else:
-            self.open_workspace(name, None)
+            self._open_workspace(name, None)
 
-    def open_workspace(self, name, password):
-        ws, msg = self.manager.open_workspace(name, password)
+    def _open_workspace(self, name: str, pwd: str | None):
+        ws, msg = self.manager.open_workspace(name, pwd)
         self.show_status(msg)
         if ws:
-            self.go_to_workspace_screen()
+            self._go_to_workspace_screen()
 
-    def go_to_workspace_screen(self):
+    # ---------- workspace screen --------------------------------------------
+
+    def _go_to_workspace_screen(self):
         ws = self.manager.current_workspace
-        screen = self.sm.get_screen("workspace")
+        screen: WorkspaceScreen = self.sm.get_screen("workspace")
         screen.ids.ws_name_label.text = f"Workspace: {ws.name}"
-        # For this test app, we'll just show the board data as pretty-printed JSON
-        board_json = json.dumps(ws.board.to_dict(), indent=2)
-        screen.ids.board_content.text = board_json
+        screen.ids.board_content.text = json.dumps(ws.board.to_dict(), indent=2)
         self.sm.current = "workspace"
 
     def save_workspace(self):
         if not self.manager.current_workspace:
             return
-        screen = self.sm.get_screen("workspace")
-        board_content_str = screen.ids.board_content.text
+        screen: WorkspaceScreen = self.sm.get_screen("workspace")
         try:
-            # Update the board object from the text input before saving
-            board_data = json.loads(board_content_str)
-            self.manager.current_workspace.board = Board.from_dict(board_data)
-            msg = self.manager.save_current_workspace()
-            self.show_status(msg)
+            board_dict = json.loads(screen.ids.board_content.text)
+            self.manager.current_workspace.board = Board.from_dict(board_dict)
         except json.JSONDecodeError:
             self.show_status("Error: Invalid JSON format in board content.")
+            return
+        self.show_status(self.manager.save_current_workspace())
+
+    # ---------- set / clear password ----------------------------------------
 
     def show_set_password_dialog(self):
-        dialog = InputDialog(title="Set Password")
-        dialog.ids.prompt_label.text = (
+        dlg = InputDialog(title="Set Password")
+        dlg.ids.prompt_label.text = (
             "Enter new password (leave blank to clear):"
         )
-        dialog.ids.text_input.password = True
-        dialog.callback = self.set_password
-        dialog.open()
+        dlg.ids.text_input.password = True
+        dlg.callback = self._set_password
+        dlg.open()
 
-    def set_password(self, password):
+    def _set_password(self, pwd: str):
         if not self.manager.current_workspace:
             return
-        msg = self.manager.current_workspace.set_password(password)
+        msg = self.manager.current_workspace.set_password(pwd)
         self.show_status(msg)
+
+    # ---------- close --------------------------------------------------------
 
     def close_workspace(self):
         msg = self.manager.close_current_workspace()
