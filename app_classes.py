@@ -3,13 +3,13 @@ import json
 import datetime
 import base64
 import shutil
-from typing import List, Dict, Optional, Any
+import random
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 
-# --- Configuration ---
+# --- Configuration Constants ---
 DEFAULT_WORKSPACES_DIR = "workspaces"
 CONFIG_FILE_NAME = "workspaces.json"
 DATA_FILE_NAME = "data.json"
@@ -19,8 +19,6 @@ SALT_SIZE = 16
 
 class EncryptionHelper:
     """Handles encryption and decryption operations using Fernet."""
-    
-    @staticmethod
     def derive_key(password, salt):
         """Derive a key from password and salt using PBKDF2."""
         kdf = PBKDF2HMAC(
@@ -30,17 +28,17 @@ class EncryptionHelper:
             iterations=100000,
             backend=default_backend()
         )
-        return base64.urlsafe_b64encode(kdf.derive(password.encode('utf-8')))
+        derived_key = kdf.derive(password.encode('utf-8'))
+        return base64.urlsafe_b64encode(derived_key)
 
-    @staticmethod
     def encrypt(data_str, password):
         """Encrypt data string with password."""
         salt = os.urandom(SALT_SIZE)
         key = EncryptionHelper.derive_key(password, salt)
-        encrypted = Fernet(key).encrypt(data_str.encode('utf-8'))
+        fernet = Fernet(key)
+        encrypted = fernet.encrypt(data_str.encode('utf-8'))
         return salt + encrypted
 
-    @staticmethod
     def decrypt(encrypted_data, password):
         """Decrypt data with password."""
         if len(encrypted_data) <= SALT_SIZE:
@@ -49,32 +47,42 @@ class EncryptionHelper:
         salt = encrypted_data[:SALT_SIZE]
         ciphertext = encrypted_data[SALT_SIZE:]
         key = EncryptionHelper.derive_key(password, salt)
-        return Fernet(key).decrypt(ciphertext).decode('utf-8')
+        fernet = Fernet(key)
+        return fernet.decrypt(ciphertext).decode('utf-8')
 
 
 class Card:
-    """Represents a card with name and description."""
+    """Represents a card with name, description, deadline, and priority."""
     
-    def __init__(self, name, description="No description provided"):
+    def __init__(self, name, description="No description provided", deadline=None, priority=0):
         self.name = name
         self.description = description
+        self.deadline = deadline
+        self.priority = priority
 
     def to_dict(self):
-        """Convert card to dictionary."""
-        return {"name": self.name, "description": self.description}
+        """Convert card to dictionary for serialization."""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "deadline": self.deadline,
+            "priority": self.priority
+        }
 
-    @classmethod
     def from_dict(cls, data):
         """Create card from dictionary."""
         return cls(
             name=data.get("name", "Untitled Card"),
-            description=data.get("description", "No description provided")
+            description=data.get("description", "No description provided"),
+            deadline=data.get("deadline", None),
+            priority=data.get("priority", 0)
         )
 
     def update_name(self, new_name):
         """Update card name."""
         old_name = self.name
         self.name = new_name
+        self.deadline = -1  # Reset deadline when name changes
         print(f"Card name changed from '{old_name}' to '{new_name}'")
 
     def update_description(self, new_description):
@@ -82,24 +90,36 @@ class Card:
         self.description = new_description
         print(f"Card '{self.name}' description updated")
 
+    def update_deadline(self, new_deadline):
+        """Update card deadline."""
+        self.deadline = new_deadline
+        print(f"Card '{self.name}' deadline updated")
+
+    def update_priority(self, new_priority):
+        """Update card priority."""
+        self.priority = new_priority
+        print(f"Card '{self.name}' priority updated")
+
 
 class ListObject:
     """A container for managing lists and their cards."""
-    
     def __init__(self, name="Untitled List", description="No description provided", cards=None):
         self.name = name
         self.description = description
         self._cards = []
         
         if cards:
-            self._cards = [Card.from_dict(card) if isinstance(card, dict) else card 
-                          for card in cards]
+            self._cards = [
+                Card.from_dict(card) if isinstance(card, dict) else card 
+                for card in cards
+            ]
 
-    @property
     def cards(self):
         """Return cards as dictionaries for compatibility."""
-        return [card.to_dict() if hasattr(card, 'to_dict') else card 
-                for card in self._cards]
+        return [
+            card.to_dict() if hasattr(card, 'to_dict') else card 
+            for card in self._cards
+        ]
 
     def change_name(self, new_name):
         """Change the name of the list."""
@@ -119,29 +139,18 @@ class ListObject:
         print(f"Added card '{card_name}' to list '{self.name}'")
         return new_card
 
-    def remove_card(self, card_name):
-        """Remove a card by name."""
-        for i, card in enumerate(self._cards):
-            if card.name == card_name:
-                removed_card = self._cards.pop(i)
-                print(f"Removed card '{removed_card.name}' from list '{self.name}'")
-                return True
-        print(f"Card '{card_name}' not found in list '{self.name}'")
-        return False
-
     def get_card_count(self):
         """Get the number of cards in this list."""
         return len(self._cards)
 
     def to_dict(self):
-        """Convert list to dictionary."""
+        """Convert list to dictionary for serialization."""
         return {
             "name": self.name,
             "description": self.description,
-            "cards": self.cards
+            "cards": self.cards()
         }
-
-    @classmethod
+    
     def from_dict(cls, data):
         """Create list from dictionary."""
         return cls(
@@ -153,20 +162,19 @@ class ListObject:
 
 class Board:
     """A container for managing board state and lists."""
-    
     def __init__(self, name="Default Board", lists=None):
         self.name = name
         self._list_objects = []
         
         if lists:
-            self._list_objects = [ListObject.from_dict(list_data) for list_data in lists]
+            self._list_objects = [
+                ListObject.from_dict(list_data) for list_data in lists
+            ]
 
-    @property
     def list_objects(self):
         """Get list objects."""
         return self._list_objects
 
-    @property
     def lists(self):
         """Return lists as dictionaries for compatibility."""
         return [list_obj.to_dict() for list_obj in self._list_objects]
@@ -178,16 +186,6 @@ class Board:
         print(f"Added list '{name}' to board '{self.name}'. Don't forget to save.")
         return new_list
 
-    def remove_list(self, list_name):
-        """Remove a list by name."""
-        for i, list_obj in enumerate(self._list_objects):
-            if list_obj.name == list_name:
-                removed_list = self._list_objects.pop(i)
-                print(f"Removed list '{removed_list.name}' from board '{self.name}'")
-                return True
-        print(f"List '{list_name}' not found in board '{self.name}'")
-        return False
-
     def get_list_by_name(self, list_name):
         """Get a list by name."""
         for list_obj in self._list_objects:
@@ -196,32 +194,34 @@ class Board:
         return None
 
     def to_dict(self):
-        """Convert board to dictionary."""
-        return {"name": self.name, "lists": self.lists}
-
-    @classmethod
+        """Convert board to dictionary for serialization."""
+        return {
+            "name": self.name,
+            "lists": self.lists()
+        }
+    
     def from_dict(cls, data):
         """Create board from dictionary."""
-        return cls(name=data.get("name", "Default Board"), lists=data.get("lists", []))
+        return cls(
+            name=data.get("name", "Default Board"), 
+            lists=data.get("lists", [])
+        )
 
 
 class Workspace:
     """Represents a workspace containing boards and metadata."""
-    
     def __init__(self, name, password=None, path=None):
         self.name = name
         self.path = path
         self._password = password
-        self.last_edited = datetime.datetime.now(datetime.timezone.utc)
+        self.last_edited = datetime.datetime.now().astimezone() 
         self._boards = [Board(name=f"{name} Board")]
         self._selected_board_index = 0
 
-    @property
     def boards(self):
         """Get all boards in the workspace."""
         return self._boards
 
-    @property
     def board(self):
         """Get the primary board (for backward compatibility)."""
         if not self._boards:
@@ -229,12 +229,11 @@ class Workspace:
             self._selected_board_index = 0
         return self._boards[0]
 
-    @property
     def selected_board(self):
         """Get the currently selected board."""
         if 0 <= self._selected_board_index < len(self._boards):
             return self._boards[self._selected_board_index]
-        return self.board if self._boards else None
+        return self.board() if self._boards else None
 
     def create_board(self, name):
         """Create a new board in the workspace."""
@@ -253,22 +252,6 @@ class Workspace:
         print(f"Board '{board_name}' not found")
         return False
 
-    def remove_board(self, board_name):
-        """Remove a board by name."""
-        if len(self._boards) <= 1:
-            print("Cannot remove the last board")
-            return False
-            
-        for i, board in enumerate(self._boards):
-            if board.name == board_name:
-                removed_board = self._boards.pop(i)
-                if self._selected_board_index >= len(self._boards):
-                    self._selected_board_index = len(self._boards) - 1
-                print(f"Removed board '{removed_board.name}' from workspace '{self.name}'")
-                return True
-        print(f"Board '{board_name}' not found")
-        return False
-
     def set_password(self, new_password):
         """Set or clear the workspace password."""
         self._password = new_password.strip() if new_password else None
@@ -281,10 +264,10 @@ class Workspace:
 
     def update_last_edited(self):
         """Update the last edited timestamp."""
-        self.last_edited = datetime.datetime.now(datetime.timezone.utc)
+        self.last_edited = datetime.datetime.now().astimezone() 
 
     def to_dict(self):
-        """Convert workspace to dictionary."""
+        """Convert workspace to dictionary for serialization."""
         return {
             "name": self.name,
             "last_edited": self.last_edited.isoformat(),
@@ -292,20 +275,21 @@ class Workspace:
             "selected_board_index": self._selected_board_index
         }
 
-    @classmethod
     def from_dict(cls, data, path):
         """Create workspace from dictionary."""
         workspace = cls(name=data.get("name", "Unnamed"), path=path)
         
-        # Handle last_edited
-        if last_edited_str := data.get("last_edited"):
+        # Handle last_edited timestamp
+        last_edited_str = data.get("last_edited")
+        if last_edited_str:
             try:
                 workspace.last_edited = datetime.datetime.fromisoformat(last_edited_str)
             except ValueError:
                 workspace.last_edited = datetime.datetime.now(datetime.timezone.utc)
         
-        # Handle boards
-        if boards_data := data.get("boards"):
+        # Handle boards data
+        boards_data = data.get("boards")
+        if boards_data:
             workspace._boards = [Board.from_dict(b_data) for b_data in boards_data]
         elif board_data := data.get("board"):  # Backward compatibility
             workspace._boards = [Board.from_dict(board_data)]
@@ -320,7 +304,6 @@ class Workspace:
 
 class WorkspaceManager:
     """Main controller for workspace operations."""
-    
     def __init__(self, config_path=CONFIG_FILE_NAME, workspaces_dir=DEFAULT_WORKSPACES_DIR):
         self.workspaces_dir = workspaces_dir
         self.config_path = config_path
@@ -329,7 +312,6 @@ class WorkspaceManager:
         
         self._initialize()
 
-    @property
     def current_workspace(self):
         """Get the currently open workspace."""
         return self._current_workspace
@@ -368,20 +350,21 @@ class WorkspaceManager:
             name: path for name, path in self._workspaces_registry.items()
             if os.path.isdir(path) and os.path.exists(os.path.join(path, DATA_FILE_NAME))
         }
+        
         if len(self._workspaces_registry) != initial_count:
             self._save_master_config()
 
     def _is_file_encrypted(self, file_path):
-        """Check if a file is encrypted."""
+        """Check if a file is encrypted by attempting to decode it as JSON."""
         try:
             with open(file_path, 'rb') as f:
                 content = f.read()
                 try:
-                    content.decode('utf-8')
-                    json.loads(content.decode('utf-8'))
-                    return False
+                    decoded_content = content.decode('utf-8')
+                    json.loads(decoded_content)
+                    return False  # Successfully decoded as JSON
                 except (UnicodeDecodeError, json.JSONDecodeError):
-                    return True
+                    return True  # Failed to decode, likely encrypted
         except IOError:
             return False
 
@@ -390,11 +373,14 @@ class WorkspaceManager:
         for attempt in range(MAX_PASSWORD_ATTEMPTS):
             prompt = f"{prompt_text} (attempt {attempt + 1}/{MAX_PASSWORD_ATTEMPTS}, type 'CANCEL' to abort): "
             password = input(prompt).strip()
+            
             if password.upper() == "CANCEL":
                 return None
             if password:
                 return password
+                
             print("Password cannot be empty.")
+        
         print("Maximum password attempts reached.")
         return None
 
@@ -448,6 +434,7 @@ class WorkspaceManager:
             with open(data_path, "rb") as f:
                 file_content = f.read()
             
+            # Decrypt or decode the content
             if password:
                 data_str = EncryptionHelper.decrypt(file_content, password)
             else:
@@ -526,173 +513,87 @@ class WorkspaceManager:
             print(f"Error deleting workspace '{name}': {e}")
             return False
 
-    @property
     def workspaces(self):
         """Get the workspaces registry (for backward compatibility)."""
         return self._workspaces_registry
 
 
-# --- CLI Test Function ---
+# --- Utility Functions ---
 def clear_console():
     """Clear the console screen."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
 def test_cli():
-    """Run an interactive command-line interface to test the WorkspaceManager."""
+    """Creates a test environment with pre-populated data."""
     manager = WorkspaceManager()
-    clear_console()
+    print("--- Cleaning up previous environment ---")
     
-    while True:
-        print("="*50)
-        status = f"Current Workspace: {manager.current_workspace.name if manager.current_workspace else 'None'}"
-        print(f"MENU\t\t{status}")
-        print("-"*50)
-        print("  list            - List all workspaces")
-        print("  create <name>   - Create a new workspace")
-        print("  open <name>     - Open a workspace")
-        print("  close           - Close the current workspace")
-        print("  save            - Save the current workspace")
-        print("  view            - View the current workspace's board")
-        print("  boards          - List all boards in current workspace")
-        print("  createboard <name> - Create a new board")
-        print("  selectboard <name> - Select a board to work with")
-        print("  lists           - List all lists in selected board")
-        print("  addlist <name>  - Add a list to the selected board")
-        print("  password <pass> - Set/change password for the open workspace")
-        print("  clear           - Clear the console screen")
-        print("  cleanup         - DELETE all workspaces and config")
-        print("  quit            - Exit the program")
-        print("="*50)
-        
-        # Show selected board if workspace is open
-        if manager.current_workspace:
-            selected_board = manager.current_workspace.selected_board
-            if selected_board:
-                print(f"Selected Board: {selected_board.name}")
-            print("-"*50)
-        
-        command_line = input("> ").strip().lower().split(maxsplit=1)
-        if not command_line:
-            continue
-            
-        cmd = command_line[0]
-        args = command_line[1] if len(command_line) > 1 else ""
+    # Clean up existing workspaces and config to ensure a fresh start
+    try:
+        if os.path.exists(manager.workspaces_dir):
+            shutil.rmtree(manager.workspaces_dir)
+        if os.path.exists(manager.config_path):
+            os.remove(manager.config_path)
+        print("Cleanup successful.")
+    except OSError as e:
+        print(f"Error during cleanup: {e}")
 
-        # --- Command Processing ---
-        if cmd == 'quit':
-            break
-        elif cmd == 'list':
-            workspaces = manager.list_workspaces()
-            if not workspaces:
-                print("\nNo workspaces found.")
-            else:
-                print("\nAvailable workspaces:")
-                for ws in workspaces:
-                    print(f"- {ws}")
-        elif cmd == 'create':
-            if not args: 
-                print("Usage: create <workspace_name>")
-            else: 
-                manager.create_workspace(args)
-        elif cmd == 'open':
-            if not args: 
-                print("Usage: open <workspace_name>")
-            else: 
-                manager.open_workspace(args)
-        elif cmd == 'close':
-            manager.close_current_workspace()
-        elif cmd == 'save':
-            manager.save_current_workspace()
-        elif cmd == 'view':
-            if manager.current_workspace and manager.current_workspace.boards:
-                selected_board = manager.current_workspace.selected_board
-                print(json.dumps(selected_board.to_dict(), indent=2))
-            else:
-                print("\nNo workspace is open or it has no boards.")
-        elif cmd == 'boards':
-            if not manager.current_workspace:
-                print("\nNo workspace is open.")
-            elif not manager.current_workspace.boards:
-                print("\nNo boards in current workspace.")
-            else:
-                print("\nBoards in current workspace:")
-                selected_board = manager.current_workspace.selected_board
-                for i, board in enumerate(manager.current_workspace.boards):
-                    marker = " (selected)" if board == selected_board else ""
-                    print(f"{i+1}. {board.name}{marker}")
-        elif cmd == 'createboard':
-            if not manager.current_workspace:
-                print("\nNo workspace is open.")
-            elif not args:
-                print("Usage: createboard <board_name>")
-            else:
-                new_board = manager.current_workspace.create_board(args)
-                manager.current_workspace.select_board(args)
-                print("Don't forget to save.")
-        elif cmd == 'selectboard':
-            if not manager.current_workspace:
-                print("\nNo workspace is open.")
-            elif not args:
-                print("Usage: selectboard <board_name>")
-            else:
-                manager.current_workspace.select_board(args)
-        elif cmd == 'lists':
-            if not manager.current_workspace:
-                print("\nNo workspace is open.")
-            else:
-                selected_board = manager.current_workspace.selected_board
-                if not selected_board:
-                    print("\nNo board selected.")
-                elif not selected_board.list_objects:
-                    print(f"\nNo lists in board '{selected_board.name}'.")
-                else:
-                    print(f"\nLists in board '{selected_board.name}':")
-                    for i, list_obj in enumerate(selected_board.list_objects):
-                        print(f"{i+1}. {list_obj.name} - {list_obj.description}")
-                        print(f"   Cards: {list_obj.get_card_count()}")
-        elif cmd == 'addlist':
-            if not manager.current_workspace:
-                print("\nNo workspace is open.")
-            elif not args:
-                print("Usage: addlist <list_name>")
-            else:
-                selected_board = manager.current_workspace.selected_board
-                if not selected_board:
-                    print("\nNo board selected.")
-                else:
-                    selected_board.create_list(args)
-        elif cmd == 'password':
-            if not manager.current_workspace:
-                print("\nNo workspace is open.")
-            else:
-                manager.current_workspace.set_password(args)
-        elif cmd == 'clear':
-            clear_console()
-            continue
-        elif cmd == 'cleanup':
-            confirm = input("This will DELETE ALL workspaces and data. Are you sure? (y/n): ").lower()
-            if confirm == 'y':
-                manager.close_current_workspace()
-                try:
-                    shutil.rmtree(manager.workspaces_dir)
-                    print(f"Removed directory: {manager.workspaces_dir}")
-                except FileNotFoundError: 
-                    pass
-                try:
-                    os.remove(manager.config_path)
-                    print(f"Removed config file: {manager.config_path}")
-                except FileNotFoundError: 
-                    pass
-                
-                print("\nCleanup successful.")
-                manager = WorkspaceManager()
-        else:
-            print("\nUnknown command.")
+    # Re-initialize manager after cleanup
+    manager = WorkspaceManager()
+    print("\n--- Setting up new test environment ---")
 
-        # --- Wait for user and clear screen ---
-        input("\nPress Enter to continue...")
-        clear_console()
+    # Create test workspaces
+    for workspace_num in range(1, 3):
+        ws_name = f"TestWorkspace{workspace_num}"
+        print(f"\nCreating workspace: {ws_name}")
+        workspace = manager.create_workspace(ws_name)
+        
+        if not workspace:
+            print(f"Failed to create {ws_name}")
+            continue
+
+        # Create boards for each workspace
+        for board_num in range(1, 6):
+            board_name = f"Board {workspace_num}-{board_num}"
+            board = workspace.create_board(board_name)
+
+            # Create lists for each board
+            num_lists = random.randint(2, 5)
+            for list_num in range(1, num_lists + 1):
+                list_name = f"List {workspace_num}-{board_num}-{list_num}"
+                list_obj = board.create_list(
+                    list_name, 
+                    f"Description for {list_name}"
+                )
+
+                # Create cards for each list
+                num_cards = random.randint(1, 8)
+                for card_num in range(1, num_cards + 1):
+                    card_name = f"Card {workspace_num}-{board_num}-{list_num}-{card_num}"
+                    card = list_obj.create_card(
+                        card_name, 
+                        f"Description for {card_name}"
+                    )
+
+                    # Set random priority
+                    card.update_priority(random.randint(0, 5))
+
+                    # Set a random deadline for about 50% of cards
+                    if random.random() > 0.5:
+                        days_ahead = random.randint(1, 30)
+                        deadline_date = datetime.datetime.now() + datetime.timedelta(days=days_ahead)
+                        card.update_deadline(deadline_date.isoformat())
+
+        print(f"Saving workspace: {ws_name}")
+        manager.save_current_workspace()
+        manager.close_current_workspace()
+
+    print("\n--- Test environment setup complete! ---")
+    print("Available workspaces:")
+    for workspace in manager.list_workspaces():
+        print(f"- {workspace}")
+    print("\nYou can now run the interactive CLI to explore the generated data.")
 
 
 if __name__ == "__main__":
