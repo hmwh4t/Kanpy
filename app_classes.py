@@ -195,10 +195,6 @@ class Board:
                 return list_obj
         return None
 
-    def get_list_count(self):
-        """Get the number of lists in this board."""
-        return len(self._list_objects)
-
     def to_dict(self):
         """Convert board to dictionary."""
         return {"name": self.name, "lists": self.lists}
