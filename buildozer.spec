@@ -1,13 +1,16 @@
 [app]
 
 # (str) Title of your application
-title = Workspace Manager
+title = Kanpy
 
 # (str) Package name
-package.name = workspacemanager
+package.name = kanpy
 
 # (str) Package domain (needed for Android)
-package.domain = org.test
+package.domain = org.kanpy
+
+# (str) Package image
+package.icon = %(source.dir)s/icon.png
 
 # (str) Source code where the main.py live
 # '.' means the current directory
@@ -32,8 +35,8 @@ requirements = python3,kivy,cryptography,cffi,pycparser,idna
 # presplash.filename = %(source.dir)s/data/presplash.png
 
 # (str) Icon of the application
-# You can create an icon at data/icon.png
-# icon.filename = %(source.dir)s/data/icon.png
+# This is the icon that will be displayed on the device.
+icon.filename = %(source.dir)s/icon.png
 
 # (list) Supported orientations
 orientation = portrait
@@ -63,3 +66,4 @@ log_level = 2
 
 # (int) Display warning if buildozer is run as root (0 = False, 1 = True)
 warn_on_root = 1
+

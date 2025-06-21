@@ -1,263 +1,370 @@
-import json
-import os
-from functools import partial
-
-# This requires a GUI-compatible WorkspaceManager from app_classes.py
-from app_classes import (
-    Board,
-    WorkspaceManager,
-    CONFIG_FILE_NAME,
-    DEFAULT_WORKSPACES_DIR,
-)
-
+import datetime
+import traceback
 from kivy.app import App
-from kivy.lang import Builder
+from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
+from kivy.properties import ObjectProperty, StringProperty, BooleanProperty
+from kivy.clock import Clock
+from kivy.uix.modalview import ModalView
 from kivy.uix.label import Label
-from kivy.uix.popup import Popup
-from kivy.uix.screenmanager import Screen, ScreenManager
-from kivy.uix.textinput import TextInput
+from kivy.metrics import dp
+from kivy.utils import get_color_from_hex
+from kivy.graphics import Color, Rectangle
+from kivy.lang import Builder
+from kivy.uix.behaviors import ButtonBehavior
 
-# --- Kivy UI Definition (KV) ---
+from app_classes import WorkspaceManager
 
-KV = """
-<WorkspaceButton>:
-    size_hint_y: None
-    height: '48dp'
+APP_COLORS = {
+    "background": get_color_from_hex("#FAFAFA"),
+    "primary": get_color_from_hex("#2563EB"),
+    "primary_dark": get_color_from_hex("#1D4ED8"),
+    "accent": get_color_from_hex("#10B981"),
+    "text": get_color_from_hex("#1F2937"),
+    "text_secondary": get_color_from_hex("#6B7280"),
+    "white": get_color_from_hex("#FFFFFF"),
+    "red": get_color_from_hex("#EF4444"),
+    "border": get_color_from_hex("#E5E7EB"),
+    "card": get_color_from_hex("#FFFFFF"),
+    "hover": get_color_from_hex("#F3F4F6")
+}
 
-<StatusPopup>:
-    size_hint: 0.8, 0.4
-    title: "Status"
-    BoxLayout:
-        orientation: 'vertical'
-        padding: '10dp'
-        spacing: '10dp'
-        Label:
-            id: status_message
-            text: ''
-            size_hint_y: 0.8
-        Button:
-            text: 'Close'
-            size_hint_y: 0.2
-            on_press: root.dismiss()
+# --- SIMPLIFIED TOAST CLASS ---
+# Now that the kv rule is fixed, this class can be very simple again.
+class Toast(ModalView):
+    text = StringProperty('')
 
-<InputDialog>:
-    size_hint: 0.9, 0.4
-    auto_dismiss: False
-    BoxLayout:
-        orientation: 'vertical'
-        padding: '10dp'
-        spacing: '10dp'
-        Label:
-            id: prompt_label
-            text: 'Enter value:'
-        TextInput:
-            id: text_input
-            multiline: False
-        BoxLayout:
-            size_hint_y: None
-            height: '48dp'
-            Button:
-                text: 'Cancel'
-                on_press: root.dismiss()
-            Button:
-                id: confirm_button
-                text: 'Confirm'
-
-ScreenManager:
-    MainScreen:
-        name: 'main'
-    WorkspaceScreen:
-        name: 'workspace'
-
-<MainScreen>:
-    BoxLayout:
-        orientation: 'vertical'
-        padding: '10dp'
-        spacing: '10dp'
-        Label:
-            text: 'Available Workspaces'
-            font_size: '24sp'
-            size_hint_y: None
-            height: '40dp'
-        ScrollView:
-            GridLayout:
-                id: workspace_list
-                cols: 1
-                size_hint_y: None
-                height: self.minimum_height
-                spacing: '5dp'
-        BoxLayout:
-            size_hint_y: None
-            height: '48dp'
-            spacing: '10dp'
-            Button:
-                text: 'Create New'
-                on_press: app.show_create_workspace_dialog()
-            Button:
-                text: 'Refresh List'
-                on_press: app.populate_workspaces()
-
-<WorkspaceScreen>:
-    BoxLayout:
-        orientation: 'vertical'
-        padding: '10dp'
-        spacing: '10dp'
-        Label:
-            id: ws_name_label
-            text: 'Workspace: '
-            font_size: '24sp'
-            size_hint_y: None
-            height: '40dp'
-        TextInput:
-            id: board_content
-            hint_text: 'Board content (JSON format)'
-        GridLayout:
-            cols: 3
-            size_hint_y: None
-            height: '48dp'
-            spacing: '10dp'
-            Button:
-                text: 'Save'
-                on_press: app.save_workspace()
-            Button:
-                text: 'Set/Clear Pwd'
-                on_press: app.show_set_password_dialog()
-            Button:
-                text: 'Close'
-                on_press: app.close_workspace()
-"""
-
-# --- Kivy Widget Classes ---
-
-class MainScreen(Screen):
-    pass
-
-class WorkspaceScreen(Screen):
-    pass
-
-class WorkspaceButton(Button):
-    pass
-
-class StatusPopup(Popup):
-    pass
-
-class InputDialog(Popup):
-    def __init__(self, **kwargs):
+    def __init__(self, text, **kwargs):
         super().__init__(**kwargs)
-        self.ids.confirm_button.bind(on_press=self._on_confirm)
-        self.callback = None
+        self.text = text
+        Clock.schedule_once(self.dismiss, 0.7) # You can adjust the duration
 
-    def _on_confirm(self, _instance):
-        if self.callback:
-            self.callback(self.ids.text_input.text)
+
+class TextInputPopup(ModalView):
+    # This class remains the same
+    title = StringProperty("Enter Value")
+    hint_text = StringProperty("")
+    callback = ObjectProperty(None)
+    is_password = BooleanProperty(False)
+    
+    def on_submit(self, text_input):
+        if self.callback: self.callback(text_input)
         self.dismiss()
 
-# --- Main Application Class ---
+class WorkspaceOptionsDialog(ModalView):
+    # This class remains the same
+    workspace_name = StringProperty("")
+    is_encrypted = BooleanProperty(False)
+    
+    def __init__(self, workspace_name, **kwargs):
+        super().__init__(**kwargs)
+        self.workspace_name = workspace_name
+        app = App.get_running_app()
+        self.is_encrypted = app.workspace_manager.is_workspace_encrypted(self.workspace_name)
 
-class WorkspaceApp(App):
+# The rest of your main.py file can remain exactly as it was in the previous answer.
+# I am including it here for completeness.
+
+class WorkspaceCard(ButtonBehavior, BoxLayout):
+    workspace_name = StringProperty('')
+    app = ObjectProperty(None)
+    last_edited_date = StringProperty('')
+    last_edited_time = StringProperty('')
+    
+    _long_press_event = None
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            self.cancel_long_press_event()
+            self._long_press_event = Clock.schedule_once(self.long_press_callback, 0.3)
+            return True
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if self.collide_point(*touch.pos):
+            if self._long_press_event:
+                self.cancel_long_press_event()
+                self.short_press_callback()
+                return True
+        self.cancel_long_press_event()
+        return super().on_touch_up(touch)
+
+    def cancel_long_press_event(self):
+        if self._long_press_event:
+            self._long_press_event.cancel()
+            self._long_press_event = None
+
+    def short_press_callback(self):
+        self.app.open_workspace(self.workspace_name)
+
+    def long_press_callback(self, _dt):
+        self._long_press_event = None
+        dialog = WorkspaceOptionsDialog(workspace_name=self.workspace_name)
+        dialog.open()
+
+
+class ListWidget(BoxLayout):
+    list_name = StringProperty('')
+
+class WorkspaceScreen(Screen):
+    def on_enter(self, *_):
+        Clock.schedule_once(self.populate_grid)
+
+    def populate_grid(self, *_):
+        try:
+            self.ids.workspaces_grid.clear_widgets()
+            app = App.get_running_app()
+            workspaces_data = app.workspace_manager.workspaces()
+            sorted_workspaces = sorted(workspaces_data.items(), key=lambda item: item[1].get('last_edited', ''), reverse=True)
+            
+            for name, data in sorted_workspaces:
+                iso_timestamp = data.get("last_edited", datetime.datetime.now().isoformat())
+                try:
+                    dt_object = datetime.datetime.fromisoformat(iso_timestamp)
+                    date_str = dt_object.strftime('%Y-%m-%d')
+                    time_str = dt_object.strftime('%H:%M')
+                except (ValueError, TypeError):
+                    date_str = "Unknown Date"
+                    time_str = ""
+
+                card = WorkspaceCard(
+                    workspace_name=name, 
+                    app=app,
+                    last_edited_date=date_str,
+                    last_edited_time=time_str
+                )
+                self.ids.workspaces_grid.add_widget(card)
+        except Exception as e:
+            print(f"FATAL ERROR in populate_grid: {e}\n{traceback.format_exc()}")
+            App.get_running_app().show_toast(f"Error refreshing workspaces: {e}")
+
+
+class BoardScreen(Screen):
+    workspace_name = StringProperty('Board')
+
+    def on_enter(self, *_):
+        Clock.schedule_once(self.populate_board)
+
+    def populate_board(self, *_):
+        try:
+            self.ids.lists_container.clear_widgets()
+            app = App.get_running_app()
+            workspace = app.workspace_manager.current_workspace()
+            if not workspace:
+                self.go_back_to_workspaces()
+                return
+
+            self.workspace_name = workspace.name
+            board = workspace.selected_board()
+            
+            self.ids.lists_container.clear_widgets()
+            
+            if board:
+                for list_obj in board.list_objects():
+                    list_widget = ListWidget(list_name=list_obj.name)
+                    self.ids.lists_container.add_widget(list_widget)
+        except Exception as e:
+            print(f"FATAL ERROR in populate_board: {e}\n{traceback.format_exc()}")
+            App.get_running_app().show_toast(f"Error loading board: {e}")
+
+
+    def go_back_to_workspaces(self):
+        app = App.get_running_app()
+        if app.workspace_manager.current_workspace():
+            app.workspace_manager.save_current_workspace()
+            app.workspace_manager.close_current_workspace()
+        self.manager.transition.direction = 'right'
+        self.manager.current = 'workspaces'
+
+class KanbanApp(App):
     def build(self):
-        self.user_dir = self.user_data_dir
-        workspaces_dir = os.path.join(self.user_dir, DEFAULT_WORKSPACES_DIR)
-        config_path = os.path.join(self.user_dir, CONFIG_FILE_NAME)
+        self.workspace_manager = WorkspaceManager()
+        Builder.load_file('app.kv')
+        self.sm = ScreenManager(transition=SlideTransition())
 
-        self.manager = WorkspaceManager(
-            config_path=config_path, workspaces_dir=workspaces_dir
-        )
-        self.sm = Builder.load_string(KV)
+        with self.sm.canvas.before:
+            Color(rgba=APP_COLORS['background'])
+            self.background_rect = Rectangle(size=self.sm.size, pos=self.sm.pos)
+
+        def update_rect(instance, value):
+            self.background_rect.pos = instance.pos
+            self.background_rect.size = instance.size
+
+        self.sm.bind(pos=update_rect, size=update_rect)
+
+        self.sm.add_widget(WorkspaceScreen(name='workspaces'))
+        self.sm.add_widget(BoardScreen(name='board'))
         return self.sm
 
-    def show_status(self, message: str):
-        popup = StatusPopup()
-        popup.ids.status_message.text = message
-        popup.open()
-
-    def on_start(self):
-        self.populate_workspaces()
-
-    def populate_workspaces(self, *_):
-        layout = self.sm.get_screen("main").ids.workspace_list
-        layout.clear_widgets()
-        names = self.manager.list_workspaces()
-        if not names:
-            layout.add_widget(Label(text="No workspaces found. Create one!"))
-            return
-        for name in names:
-            btn = WorkspaceButton(text=name)
-            btn.bind(on_press=partial(self._maybe_open_workspace, name))
-            layout.add_widget(btn)
-
-    def show_create_workspace_dialog(self):
-        dlg = InputDialog(title="Create Workspace")
-        dlg.ids.prompt_label.text = "Enter new workspace name:"
-        dlg.callback = self._create_workspace
-        dlg.open()
-
-    def _create_workspace(self, name: str):
-        if not name:
-            self.show_status("Workspace name cannot be empty.")
-            return
-        ws, msg = self.manager.create_workspace(name)
-        self.show_status(msg)
-        if ws:
-            self.populate_workspaces()
-            self._go_to_workspace_screen()
-
-    def _maybe_open_workspace(self, name: str, _instance):
-        if self.manager.is_workspace_encrypted(name):
-            dlg = InputDialog(title=f"Open '{name}'")
-            dlg.ids.prompt_label.text = "Enter password:"
-            dlg.ids.text_input.password = True
-            dlg.callback = lambda pwd: self._open_workspace(name, pwd)
-            dlg.open()
-        else:
-            self._open_workspace(name, None)
-
-    def _open_workspace(self, name: str, pwd: str | None):
-        ws, msg = self.manager.open_workspace(name, pwd)
-        self.show_status(msg)
-        if ws:
-            self._go_to_workspace_screen()
-
-    def _go_to_workspace_screen(self):
-        ws = self.manager.current_workspace
-        screen: WorkspaceScreen = self.sm.get_screen("workspace")
-        screen.ids.ws_name_label.text = f"Workspace: {ws.name}"
-        screen.ids.board_content.text = json.dumps(ws.board.to_dict(), indent=2)
-        self.sm.current = "workspace"
-
-    def save_workspace(self):
-        if not self.manager.current_workspace:
-            return
-        screen: WorkspaceScreen = self.sm.get_screen("workspace")
+    def show_toast(self, text):
         try:
-            board_dict = json.loads(screen.ids.board_content.text)
-            self.manager.current_workspace.board = Board.from_dict(board_dict)
-        except json.JSONDecodeError:
-            self.show_status("Error: Invalid JSON format in board content.")
-            return
-        self.show_status(self.manager.save_current_workspace())
+            toast_widget = Toast(text=str(text))
+            toast_widget.open()
+        except Exception as e:
+            print(f"--- FAILED TO CREATE TOAST ---")
+            print(f"Original message: {text}")
+            print(f"Toast creation error: {e}")
+            print(f"{traceback.format_exc()}")
 
-    def show_set_password_dialog(self):
-        dlg = InputDialog(title="Set Password")
-        dlg.ids.prompt_label.text = "Enter new password (leave blank to clear):"
-        dlg.ids.text_input.password = True
-        dlg.callback = self._set_password
-        dlg.open()
+    def open_workspace(self, workspace_name):
+        try:
+            if self.workspace_manager.is_workspace_encrypted(workspace_name):
+                popup = TextInputPopup(
+                    title=f"Password for {workspace_name}", hint_text="Enter password", is_password=True,
+                    callback=lambda password: self.open_workspace_callback(workspace_name, password)
+                )
+                popup.open()
+            else:
+                if self.workspace_manager.open_workspace(workspace_name):
+                    self.sm.transition.direction = 'left'
+                    self.sm.current = 'board'
+        except Exception as e:
+            print(f"ERROR in open_workspace: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Error opening workspace: {e}")
 
-    def _set_password(self, pwd: str):
-        if not self.manager.current_workspace:
-            return
-        msg = self.manager.current_workspace.set_password(pwd)
-        self.show_status(msg)
+    def open_workspace_callback(self, workspace_name, password):
+        try:
+            workspace = self.workspace_manager.open_workspace(workspace_name, password=password)
+            if workspace and workspace != "password_required":
+                self.sm.transition.direction = 'left'
+                self.sm.current = 'board'
+            else:
+                self.show_toast("Failed to open workspace. Incorrect password.")
+        except Exception as e:
+            print(f"ERROR in open_workspace_callback: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Error with password: {e}")
 
-    def close_workspace(self):
-        msg = self.manager.close_current_workspace()
-        self.show_status(msg)
-        self.sm.current = "main"
-        self.populate_workspaces()
+    def create_new_workspace(self):
+        popup = TextInputPopup(title="Create Workspace", hint_text="Enter name", callback=self.create_workspace_callback)
+        popup.open()
+        
+    def create_workspace_callback(self, name):
+        try:
+            if not name:
+                self.show_toast("Workspace name cannot be empty.")
+                return
+
+            if self.workspace_manager.create_workspace(name):
+                self.show_toast(f"Workspace '{name}' created.")
+                self.sm.get_screen('workspaces').populate_grid()
+            else:
+                self.show_toast(f"Workspace '{name}' already exists.")
+        except Exception as e:
+            print(f"ERROR in create_workspace_callback: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Failed to create workspace: {e}")
 
 
-if __name__ == "__main__":
-    WorkspaceApp().run()
+    def delete_workspace(self, workspace_name):
+        try:
+            if self.workspace_manager.delete_workspace(workspace_name):
+                self.show_toast(f"Workspace '{workspace_name}' deleted.")
+                self.sm.get_screen('workspaces').populate_grid()
+            else:
+                self.show_toast("Error: Could not delete workspace.")
+        except Exception as e:
+            print(f"ERROR in delete_workspace: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Failed to delete workspace: {e}")
+            
+    def rename_workspace(self, old_name):
+        try:
+            if self.workspace_manager.is_workspace_encrypted(old_name):
+                popup = TextInputPopup(
+                    title=f"Password for {old_name}", hint_text="Enter current password to rename", is_password=True,
+                    callback=lambda password: self.rename_password_check_callback(old_name, password)
+                )
+                popup.open()
+            else:
+                popup = TextInputPopup(
+                    title="Rename Workspace", hint_text="Enter new name",
+                    callback=lambda new_name: self.rename_workspace_callback(old_name, new_name)
+                )
+                popup.open()
+        except Exception as e:
+            print(f"ERROR in rename_workspace: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Error renaming: {e}")
+
+    def rename_password_check_callback(self, old_name, password):
+        try:
+            workspace = self.workspace_manager.open_workspace(old_name, password=password)
+            if workspace and workspace != "password_required":
+                self.workspace_manager.close_current_workspace()
+                popup = TextInputPopup(
+                    title="Rename Workspace", hint_text="Enter new name",
+                    callback=lambda new_name: self.rename_workspace_callback(old_name, new_name, password)
+                )
+                popup.open()
+            else:
+                self.show_toast("Incorrect password. Cannot rename.")
+        except Exception as e:
+            print(f"ERROR in rename_password_check_callback: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Password check failed: {e}")
+            
+    def rename_workspace_callback(self, old_name, new_name, password=None):
+        try:
+            if not new_name:
+                self.show_toast("New name cannot be empty.")
+                return
+            
+            if self.workspace_manager.rename_workspace(old_name, new_name, password=password):
+                self.show_toast(f"Renamed '{old_name}' to '{new_name}'.")
+                self.sm.get_screen('workspaces').populate_grid()
+            else:
+                self.show_toast(f"Failed to rename. '{new_name}' may already exist.")
+        except Exception as e:
+            print(f"ERROR in rename_workspace_callback: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Failed to rename workspace: {e}")
+
+    def set_workspace_password(self, workspace_name):
+        try:
+            if self.workspace_manager.is_workspace_encrypted(workspace_name):
+                popup = TextInputPopup(
+                    title="Confirm Current Password", hint_text="Enter current password", is_password=True,
+                    callback=lambda password: self.change_password_confirm_callback(workspace_name, password)
+                )
+                popup.open()
+            else:
+                popup = TextInputPopup(
+                    title="Set New Password", hint_text="Enter new password", is_password=True,
+                    callback=lambda password: self.set_password_callback(workspace_name, password, is_new=True)
+                )
+                popup.open()
+        except Exception as e:
+            print(f"ERROR in set_workspace_password: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Error setting password: {e}")
+
+    def change_password_confirm_callback(self, workspace_name, current_password):
+        try:
+            workspace = self.workspace_manager.open_workspace(workspace_name, password=current_password)
+            if workspace and workspace != "password_required":
+                self.workspace_manager.close_current_workspace()
+                popup = TextInputPopup(
+                    title="Enter New Password", hint_text="Enter new password (or leave blank to remove)", is_password=True,
+                    callback=lambda new_password: self.set_password_callback(workspace_name, new_password, current_password=current_password)
+                )
+                popup.open()
+            else:
+                self.show_toast("Incorrect current password.")
+        except Exception as e:
+            print(f"ERROR in change_password_confirm_callback: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Password confirmation failed: {e}")
+
+    def set_password_callback(self, workspace_name, password, is_new=False, current_password=None):
+        try:
+            auth_password = current_password if not is_new else None
+            workspace = self.workspace_manager.open_workspace(workspace_name, password=auth_password)
+            
+            if workspace and workspace != "password_required":
+                workspace.set_password(password)
+                self.workspace_manager.save_current_workspace()
+                self.workspace_manager.close_current_workspace()
+                self.show_toast("Password updated successfully.")
+                self.sm.get_screen('workspaces').populate_grid()
+            else:
+                self.show_toast("An error occurred. Could not update password.")
+        except Exception as e:
+            print(f"ERROR in set_password_callback: {e}\n{traceback.format_exc()}")
+            self.show_toast(f"Failed to set password: {e}")
+
+
+if __name__ == '__main__':
+    KanbanApp().run()
