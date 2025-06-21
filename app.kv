@@ -1,0 +1,588 @@
+#:import APP_COLORS main.APP_COLORS
+#:import dp kivy.metrics.dp
+
+# --- FONT DEFINITION ---
+# I've set a name for the NerdFont. You must register this name
+# in your main.py file for the icons to appear correctly.
+#:set NERD_FONT "NerdFont"
+
+<Toast>:
+    background_color: 0, 0, 0, 0
+    size_hint: None, None
+    size: label.texture_size
+    pos_hint: {'center_x': .5, 'center_y': .1}
+    Label:
+        id: label
+        text: root.text
+        size_hint: None, None
+        text_size: dp(280), None
+        size: self.texture_size
+        padding: [dp(15), dp(10)]
+        halign: 'center'
+        canvas.before:
+            Color:
+                rgba: [0.1, 0.1, 0.1, 0.9]
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(15),]
+
+# --- UPDATED DIALOG BUTTON STYLE ---
+<DialogButton@Button>:
+    background_color: 0, 0, 0, 0
+    size_hint_y: None
+    height: '48dp'
+    color: APP_COLORS['primary']
+    # Add a subtle background that appears on press for better feedback
+    canvas.before:
+        Color:
+            rgba: APP_COLORS['hover'] if self.state == 'down' else (0,0,0,0)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(8),]
+
+<TextInputPopup>:
+    background_color: 0, 0, 0, .5
+    BoxLayout:
+        id: content_box
+        orientation: 'vertical'
+        padding: '15dp'
+        spacing: '10dp'
+        size_hint: .9, None
+        height: self.minimum_height
+        pos_hint: {'center_x': .5, 'center_y': .5}
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['white']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(15),]
+        Label:
+            text: root.title
+            font_size: '20sp'
+            height: '40dp'
+            size_hint_y: None
+            color: APP_COLORS['text']
+        TextInput:
+            id: text_input
+            hint_text: root.hint_text
+            multiline: False
+            size_hint_y: None
+            height: '44dp'
+            password: root.is_password
+            focus: True
+        # --- ROUNDED SUBMIT BUTTON ---
+        Button:
+            text: 'Submit'
+            size_hint_y: None
+            height: '48dp'
+            on_press: root.on_submit(text_input.text)
+            background_color: 0,0,0,0 # Set to transparent
+            color: APP_COLORS['white']
+            canvas.before:
+                Color:
+                    rgba: APP_COLORS['primary_dark'] if self.state == 'down' else APP_COLORS['primary']
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.size
+                    radius: [dp(24),]
+
+
+<WorkspaceOptionsDialog>:
+    background_color: 0, 0, 0, .5
+    size_hint: 0.85, None
+    height: content_box.height
+    BoxLayout:
+        id: content_box
+        orientation: 'vertical'
+        size_hint_y: None
+        height: self.minimum_height
+        padding: '15dp'
+        spacing: '10dp'
+        pos_hint: {'center_x': .5, 'center_y': .5}
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['white']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(15),]
+        Label:
+            text: f"Options for '{root.workspace_name}'"
+            font_size: '20sp'
+            size_hint_y: None
+            height: '40dp'
+            bold: True
+            color: APP_COLORS['text']
+        DialogButton:
+            text: 'Rename'
+            on_press: app.rename_workspace(root.workspace_name); root.dismiss()
+        DialogButton:
+            text: 'Change Password' if root.is_encrypted else 'Add Password'
+            on_press: app.set_workspace_password(root.workspace_name); root.dismiss()
+        DialogButton:
+            text: 'Delete'
+            color: APP_COLORS['red']
+            on_press: app.delete_workspace(root.workspace_name); root.dismiss()
+
+<BoardOptionsDialog>:
+    background_color: 0, 0, 0, .5
+    size_hint: 0.85, None
+    height: content_box.height
+    BoxLayout:
+        id: content_box
+        orientation: 'vertical'
+        size_hint_y: None
+        height: self.minimum_height
+        padding: '15dp'
+        spacing: '10dp'
+        pos_hint: {'center_x': .5, 'center_y': .5}
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['white']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(15),]
+        Label:
+            text: "Board Options"
+            font_size: '20sp'
+            size_hint_y: None
+            height: '40dp'
+            bold: True
+            color: APP_COLORS['text']
+        DialogButton:
+            text: 'Rename Board'
+            on_press: root.board_screen.rename_current_board_popup(); root.dismiss()
+        DialogButton:
+            text: 'Open Bin'
+            on_press: root.open_bin()
+        DialogButton:
+            text: 'Delete Board'
+            color: APP_COLORS['red']
+            on_press: root.delete_board()
+
+<CreateBoardDialog>:
+    background_color: 0, 0, 0, .5
+    size_hint: 0.85, None
+    height: content_box.height
+    BoxLayout:
+        id: content_box
+        orientation: 'vertical'
+        size_hint_y: None
+        height: self.minimum_height
+        padding: '15dp'
+        spacing: '10dp'
+        pos_hint: {'center_x': .5, 'center_y': .5}
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['white']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(15),]
+        Label:
+            text: "No more boards. Create a new one?"
+            font_size: '18sp'
+            size_hint_y: None
+            height: '40dp'
+            color: APP_COLORS['text']
+        BoxLayout:
+            size_hint_y: None
+            height: '48dp'
+            spacing: '10dp'
+            # --- ROUNDED DIALOG BUTTONS ---
+            Button:
+                text: "Yes"
+                on_press: root.create_new_board()
+                background_color: 0,0,0,0
+                color: APP_COLORS['white']
+                canvas.before:
+                    Color:
+                        rgba: APP_COLORS['accent']
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(24),]
+            Button:
+                text: "No"
+                on_press: root.dismiss()
+                background_color: 0,0,0,0
+                color: APP_COLORS['text_secondary']
+                canvas.before:
+                    Color:
+                        rgba: APP_COLORS['white']
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(24),]
+                    Color:
+                        rgba: APP_COLORS['border']
+                    Line:
+                        width: dp(1)
+                        rounded_rectangle: (self.x, self.y, self.width, self.height, dp(24))
+
+
+<ListContextMenu>:
+    size_hint: None, None
+    size: dp(180), dp(100)
+    background_color: 0,0,0,0
+    auto_dismiss: True
+    pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+    BoxLayout:
+        orientation: 'vertical'
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['white']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(8),]
+            Color:
+                rgba: APP_COLORS['border']
+            Line:
+                width: dp(1)
+                rounded_rectangle: (self.x, self.y, self.width, self.height, dp(8))
+        DialogButton:
+            text: "Rename"
+            on_press: root.rename()
+        DialogButton:
+            text: "Move to Bin"
+            color: APP_COLORS['red']
+            on_press: root.move_to_bin()
+
+<WorkspaceCard>:
+    orientation: 'vertical'
+    size_hint_y: None
+    height: "120dp"
+    padding: "12dp"
+    spacing: "5dp"
+    canvas.before:
+        Color:
+            rgba: APP_COLORS['hover'] if self.state == 'down' else APP_COLORS['white']
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [dp(12),]
+        Color:
+            rgba: APP_COLORS['border']
+        Line:
+            width: dp(1)
+            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(12))
+    Label:
+        text: root.workspace_name
+        font_size: '18sp'
+        color: APP_COLORS['text']
+        bold: True
+        halign: 'left'
+        valign: 'top'
+        text_size: self.width, None
+    BoxLayout:
+        orientation: 'horizontal'
+        size_hint_y: None
+        height: self.minimum_height
+        Label: # Spacer
+        Label:
+            text: root.last_edited_date + " " + root.last_edited_time
+            font_size: '12sp'
+            color: APP_COLORS['text_secondary']
+            size_hint_x: None
+            width: self.texture_size[0] + dp(10)
+            halign: 'right'
+
+
+<ListWidget>:
+    orientation: 'vertical'
+    size_hint_x: None
+    width: '280dp'
+    spacing: '10dp'
+    padding: '10dp'
+    canvas.before:
+        Color:
+            rgba: APP_COLORS['card']
+        RoundedRectangle:
+            size: self.size
+            pos: self.pos
+            radius: [dp(12),]
+    BoxLayout:
+        size_hint_y: None
+        height: dp(40)
+        ListHeader:
+            list_widget: root
+            Label:
+                text: root.list_name
+                font_size: '18sp'
+                bold: True
+                halign: 'left'
+                valign: 'middle'
+                text_size: self.size
+                color: APP_COLORS['text']
+                shorten: True
+                shorten_from: 'right'
+                ellipsis_options: {'color':(1,0.5,0.5,1),'underline':True}
+        # --- UPDATED LIST OPTIONS BUTTON WITH NERDFONT ICON ---
+        Button:
+            id: options_button
+            text: '\uf142' # NerdFont Icon: nf-fa-ellipsis_v
+            font_name: NERD_FONT
+            font_size: '20sp'
+            size_hint_x: None
+            width: dp(40)
+            background_color: 0,0,0,0
+            color: APP_COLORS['text_secondary']
+            on_release: root.open_context_menu()
+    ScrollView:
+        do_scroll_y: True
+        do_scroll_x: False
+        bar_width: dp(4)
+        BoxLayout:
+            id: cards_layout
+            orientation: 'vertical'
+            spacing: '8dp'
+            size_hint_y: None
+            height: self.minimum_height
+
+
+<BoardWidget>:
+    Label:
+        id: empty_board_label
+        text: "Blank board. Try adding a list!"
+        font_size: '18sp'
+        halign: 'center'
+        color: APP_COLORS['text_secondary']
+        opacity: 0
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+
+    ScrollView:
+        id: scroll_view
+        do_scroll_x: True
+        do_scroll_y: False
+        bar_width: dp(6)
+        bar_color: APP_COLORS['primary']
+        bar_inactive_color: APP_COLORS['border']
+        effect_cls: 'ScrollEffect'
+        GridLayout:
+            id: lists_container
+            rows: 1
+            spacing: dp(10)
+            padding: [dp(10), dp(20), dp(10), dp(20)]
+            size_hint_x: None
+            width: self.minimum_width
+
+
+<BinItem>:
+    size_hint_y: None
+    height: dp(56)
+    padding: dp(8)
+    spacing: dp(8)
+    canvas.before:
+        Color:
+            rgba: APP_COLORS['white']
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    Label:
+        text: f"{root.item_name} ({root.item_type})"
+        halign: 'left'
+        valign: 'middle'
+        text_size: self.size
+        color: APP_COLORS['text']
+    # --- ROUNDED BIN BUTTONS ---
+    Button:
+        text: "Restore"
+        size_hint_x: None
+        width: dp(100)
+        on_press: root.bin_screen.restore_item(root.item_name, root.item_type)
+        background_color: 0,0,0,0
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['accent']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(8),]
+    Button:
+        text: "Delete"
+        size_hint_x: None
+        width: dp(100)
+        on_press: root.bin_screen.delete_item_permanently(root.item_name, root.item_type)
+        background_color: 0,0,0,0
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['red']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(8),]
+
+
+<WorkspaceScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: [dp(10), dp(10), dp(10), dp(20)]
+        spacing: "10dp"
+        Label:
+            text: 'Workspaces'
+            font_size: '32sp'
+            size_hint_y: None
+            height: '50dp'
+            color: APP_COLORS['primary_dark']
+            bold: True
+            halign: 'left'
+            valign: 'center'
+            text_size: self.width, None
+            padding: [dp(5), 0]
+        ScrollView:
+            GridLayout:
+                id: workspaces_grid
+                cols: 2
+                spacing: "10dp"
+                padding: [dp(5), 0]
+                size_hint_y: None
+                height: self.minimum_height
+        Button:
+            text: '+ Add Workspace'
+            size_hint_y: None
+            height: '50dp'
+            font_size: '18sp'
+            color: APP_COLORS['white']
+            background_color: 0,0,0,0
+            on_press: app.create_new_workspace()
+            canvas.before:
+                Color:
+                    rgba: APP_COLORS['primary'] if self.state == 'normal' else APP_COLORS['primary_dark']
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.size
+                    radius: [dp(25),]
+
+
+<BoardScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['background_dark']
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+        # --- HEADER ---
+        BoxLayout:
+            id: header_bar
+            size_hint_y: None
+            height: '56dp'
+            padding: ('8dp', '8dp')
+            spacing: '8dp'
+            canvas.before:
+                Color:
+                    rgba: APP_COLORS['primary']
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+            Button:
+                text: '\uf015' # NerdFont Icon: nf-fa-home
+                font_name: NERD_FONT
+                font_size: '20sp'
+                size_hint_x: None
+                width: self.texture_size[0] + dp(30)
+                on_press: root.go_back_to_workspaces()
+                background_color: 0,0,0,0.2 # subtle background
+                color: APP_COLORS['white']
+            Button:
+                text: '\uf053' # NerdFont Icon: nf-fa-chevron_left
+                font_name: NERD_FONT
+                size_hint_x: None
+                width: '48dp'
+                bold: True
+                on_press: root.load_previous_board()
+                color: APP_COLORS['white']
+                background_color: 0,0,0,0.2
+            Label:
+                id: board_indicator_label
+                text: "Board"
+                font_size: '20sp'
+                bold: True
+                color: APP_COLORS['white']
+            Button:
+                text: '\uf054' # NerdFont Icon: nf-fa-chevron_right
+                font_name: NERD_FONT
+                size_hint_x: None
+                width: '48dp'
+                bold: True
+                on_press: root.load_next_board()
+                color: APP_COLORS['white']
+                background_color: 0,0,0,0.2
+            Button:
+                text: '\uf142' # NerdFont Icon: nf-fa-ellipsis_v
+                font_name: NERD_FONT
+                font_size: '20sp'
+                size_hint_x: None
+                width: '48dp'
+                on_press: root.open_board_options()
+                color: APP_COLORS['white']
+                background_color: 0,0,0,0.2
+
+        # This container holds the active BoardWidget
+        BoxLayout:
+            id: board_container
+
+        # --- UPDATED BOTTOM BUTTON CONTAINER ---
+        BoxLayout:
+            size_hint_y: None
+            # The container's height is now based on its contents
+            height: self.minimum_height
+            # Add top padding to shorten lists and bottom padding for margin
+            padding: [dp(10), dp(10), dp(10), dp(20)]
+            Button:
+                text: '+ Add New List'
+                # Give the button an explicit height
+                size_hint_y: None
+                height: '50dp'
+                font_size: '18sp'
+                color: APP_COLORS['white']
+                background_color: 0,0,0,0
+                on_press: root.add_new_list_to_current_board()
+                canvas.before:
+                    Color:
+                        rgba: APP_COLORS['accent'] if self.state == 'normal' else APP_COLORS['primary_dark']
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(25),]
+
+<BinScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        BoxLayout:
+            size_hint_y: None
+            height: '56dp'
+            padding: '10dp'
+            spacing: '10dp'
+            canvas.before:
+                Color:
+                    rgba: APP_COLORS['primary']
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+            # --- ROUNDED BACK BUTTON WITH ICON ---
+            Button:
+                text: '< Back'
+                size_hint_x: None
+                width: self.texture_size[0] + dp(20)
+                background_color: 0,0,0,0.2
+                on_press: root.go_back_to_board()
+            Label:
+                text: "Bin"
+                font_size: '22sp'
+                bold: True
+        ScrollView:
+            GridLayout:
+                id: bin_items_grid
+                cols: 1
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(2)
+                padding: dp(2)
