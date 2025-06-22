@@ -81,6 +81,11 @@ class Card:
         )
         card.completed = data.get("completed", False)
         return card
+    
+    def get_priority_display(self) -> str:
+        """Return a string of red exclamation marks based on priority."""
+        return "[color=ff0000]" + "❗" * self.priority + "[/color]"
+
 
 class ListObject:
     """Represents a list containing multiple cards."""
