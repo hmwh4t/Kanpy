@@ -125,6 +125,7 @@ class Board:
         self.name = name
         self.workspace = workspace_instance # Reference to parent workspace
         self.lists = []  # Stores List objects
+        self.bin = Bin()
 
     def _generate_id(self):
         return str(uuid.uuid4())
@@ -141,19 +142,12 @@ class Board:
         else:
             print(f"Warning: List with ID {list_object.list_id} already on board '{self.name}'.")
 
-
     def create_list(self, list_name, description="None"):
         new_list = List(list_name=list_name, description=description)
         self.add_list(new_list)
         # Workspace last_edited updated on save
         return new_list
-
-    def remove_list(self, list_id_to_remove):
-        initial_len = len(self.lists)
-        self.lists = [lst for lst in self.lists if lst.list_id != list_id_to_remove]
-        # Workspace last_edited updated on save if successful
-        return len(self.lists) < initial_len
-
+   
     def get_list(self, list_id_to_find):
         for lst in self.lists:
             if lst.list_id == list_id_to_find:
@@ -163,6 +157,17 @@ class Board:
     def get_all_lists(self):
         return self.lists
 
+    def delete_list(self, list_id_to_delete: str) -> bool:
+        list_to_delete = self.get_list(list_id_to_delete)
+        
+        if list_to_delete:
+            self.bin.move_list_to_bin(list_to_delete)
+            self.lists = [lst for lst in self.lists if lst.list_id != list_to_delete.list_id]
+            return True
+        
+        print(f"Warning: Could not find list with ID '{list_id_to_delete}' to delete.")
+        return False
+    
     def __str__(self):
         list_overviews = [f"  - List: '{l.list_name}' (ID: {l.list_id[:8]}..., {len(l.cards)} cards)" for l in self.lists]
         lists_str = "\n".join(list_overviews) if list_overviews else "  No lists on this board yet."
@@ -172,7 +177,8 @@ class Board:
         return {
             "board_id": self.board_id,
             "name": self.name,
-            "lists": [lst.to_dict() for lst in self.lists]
+            "lists": [lst.to_dict() for lst in self.lists],
+            "bin": self.bin.to_dict()
         }
 
     @classmethod
@@ -182,9 +188,15 @@ class Board:
             name=data.get("name", "Unnamed Board from data"),
             workspace_instance=workspace_instance
         )
+
         list_data_list = data.get("lists", [])
         for list_data in list_data_list:
             board_obj.add_list(List.from_dict(list_data))
+
+        bin_data = data.get("bin")
+        if bin_data:
+            board_obj.bin = Bin.from_dict(bin_data)
+
         return board_obj
 
 class workspace_manager:
@@ -734,7 +746,7 @@ def manage_board_menu(board: Board, wm: workspace_manager):
             if list_id_to_delete:
                 list_to_delete = board.get_list(list_id_to_delete)
                 if easygui.ynbox(f"Are you sure you want to delete list '{list_to_delete.list_name}' and all its cards?", "Confirm Deletion"):
-                    if board.remove_list(list_id_to_delete):
+                    if board.delete_list(list_id_to_delete):
                         easygui.msgbox(f"List '{list_to_delete.list_name}' deleted. Remember to save.", "List Deleted")
                     else:
                         easygui.msgbox(f"Failed to delete list '{list_to_delete.list_name}'.", "Error")
@@ -801,7 +813,7 @@ def manage_list_menu(current_list: List, board: Board, wm: workspace_manager):
 
         elif action == "Delete This List":
             if easygui.ynbox(f"Are you sure you want to delete list '{current_list.list_name}' and all its cards?", "Confirm Deletion"):
-                if board.remove_list(current_list.list_id):
+                if board.delete_list(current_list.list_id):
                     easygui.msgbox(f"List '{current_list.list_name}' deleted. Remember to save.", "List Deleted")
                     return # Exit list management as list is gone
                 else: # Should not happen if ID was correct
