@@ -25,7 +25,7 @@ source.include_patterns = *.py,*.kv,*.txt,*.ttf,*.json
 source.exclude_dirs = tests, bin, venv, .venv, __pycache__
 
 # (str) Application versioning
-version = 0.5
+version = 1.0
 
 # (list) Application requirements
 # All the python packages your app needs.
@@ -48,7 +48,7 @@ orientation = portrait
 
 # (list) Android permissions
 # WRITE_EXTERNAL_STORAGE is needed because your app saves files.
-android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,READ_CALENDAR,WRITE_CALENDAR
 
 # (int) Target Android API, should be as high as possible.
 android.api = 31

@@ -3,6 +3,7 @@
 
 #:set NERD_FONT "NerdFont"
 
+# A custom toast notification widget.
 <Toast>:
     background_color: 0, 0, 0, 0
     size_hint: None, None
@@ -24,6 +25,7 @@
                 size: self.size
                 radius: [dp(15),]
 
+# A styled button for use in dialogs and context menus.
 <DialogButton@Button>:
     background_color: 0, 0, 0, 0
     size_hint_y: None
@@ -40,6 +42,7 @@
             size: self.size
             radius: [dp(8),]
 
+# A popup for getting text input from the user.
 <TextInputPopup>:
     background_color: 0, 0, 0, .5
     BoxLayout:
@@ -86,6 +89,7 @@
                     size: self.size
                     radius: [dp(24),]
 
+# A popup that shows a list of lists to move a card to.
 <MoveCardPopup>:
     background_color: 0, 0, 0, .5
     size_hint: 0.85, 0.6
@@ -117,6 +121,7 @@
                 height: self.minimum_height
                 spacing: '5dp'
 
+# A context menu for a card, providing options like edit, move, delete.
 <CardContextMenu>:
     size_hint: None, None
     width: dp(200)
@@ -147,6 +152,11 @@
             text: "Edit"
             on_press: root.edit_card()
         DialogButton:
+            text: "Set Priority"
+            on_press: root.set_priority()
+            # Disable this button if the card is in a completed list
+            disabled: root.card_widget.is_in_completed_list
+        DialogButton:
             id: move_button
             text: "Move"
             on_press: root.move_card()
@@ -155,6 +165,7 @@
             color: APP_COLORS['red']
             on_press: root.delete_card()
 
+# A dialog for workspace options like renaming, changing password, or deleting.
 <WorkspaceOptionsDialog>:
     background_color: 0, 0, 0, .5
     size_hint: 0.85, None
@@ -192,6 +203,7 @@
             color: APP_COLORS['red']
             on_press: app.delete_workspace(root.workspace_name); root.dismiss()
 
+# A dialog for board options like renaming, opening the bin, or deleting.
 <BoardOptionsDialog>:
     background_color: 0, 0, 0, .5
     size_hint: 0.85, None
@@ -229,6 +241,7 @@
             color: APP_COLORS['red']
             on_press: root.delete_board()
 
+# A dialog that prompts the user to create a new board when none exist.
 <CreateBoardDialog>:
     background_color: 0, 0, 0, .5
     size_hint: 0.85, None
@@ -288,6 +301,7 @@
                         width: dp(1)
                         rounded_rectangle: (self.x, self.y, self.width, self.height, dp(24))
 
+# A context menu for a list, providing options like rename, set as completed, and move to bin.
 <ListContextMenu>:
     size_hint: None, None
     size: dp(220), dp(150)
@@ -321,6 +335,7 @@
             color: APP_COLORS['red']
             on_press: root.move_to_bin()
 
+# A generic confirmation popup with "Cancel" and "Confirm" buttons.
 <ConfirmationPopup>:
     background_color: 0, 0, 0, .5
     BoxLayout:
@@ -384,6 +399,7 @@
                         size: self.size
                         radius: [dp(24),]
 
+# A popup containing a calendar widget for date selection.
 <DatePickerPopup>:
     size_hint: 0.9, None
     height: dp(380)
@@ -429,6 +445,7 @@
             background_color: 0,0,0,0
             color: APP_COLORS['primary']
 
+# The visual representation of a single workspace on the workspace screen.
 <WorkspaceCard>:
     orientation: 'vertical'
     size_hint_y: None
@@ -469,6 +486,7 @@
             halign: 'right'
 
 
+# The widget representing a single list (column) in a board.
 <ListWidget>:
     orientation: 'vertical'
     size_hint_x: None
@@ -534,6 +552,7 @@
             height: self.minimum_height
 
 
+# The main widget for a board, containing a scrollable area for lists.
 <BoardWidget>:
     Label:
         id: empty_board_label
@@ -561,6 +580,7 @@
             width: self.minimum_width
 
 
+# The widget for a single item in the bin screen.
 <BinItem>:
     size_hint_y: None
     height: dp(56)
@@ -608,6 +628,7 @@
                 radius: [dp(8),]
 
 
+# The screen that displays all available workspaces.
 <WorkspaceScreen>:
     BoxLayout:
         orientation: 'vertical'
@@ -649,6 +670,7 @@
                     radius: [dp(25),]
 
 
+# The main screen for viewing and interacting with a board.
 <BoardScreen>:
     BoxLayout:
         orientation: 'vertical'
@@ -738,6 +760,7 @@
                         size: self.size
                         radius: [dp(25),]
 
+# The screen for viewing and managing deleted items (the bin).
 <BinScreen>:
     BoxLayout:
         orientation: 'vertical'
@@ -771,6 +794,7 @@
                 spacing: dp(2)
                 padding: dp(2)
 
+# The widget representing a single card in a list.
 <CardWidget>:
     orientation: 'vertical'
     size_hint_y: None
@@ -790,20 +814,46 @@
             rounded_rectangle: (self.pos[0], self.pos[1], self.size[0], self.size[1], dp(8))
             width: 1
 
+    # This is the top row of the card
     BoxLayout:
         size_hint_y: None
         height: self.minimum_height
+        spacing: dp(8)
+
+        # Card Name
         Label:
             text: root.card_obj.name if root.card_obj else ''
             font_size: '16sp'
             color: APP_COLORS['text_secondary'] if root.is_in_completed_list else APP_COLORS['text']
             halign: 'left'
             valign: 'top'
-            size_hint_x: 0.8
             text_size: self.width, None
             height: self.texture_size[1]
+            size_hint_x: 1 # Allow the name to take up available space
             bold: True
+            
+        # Priority Indicator - MOVED HERE
+        BoxLayout:
+            opacity: 1 if root.card_obj and root.card_obj.priority > 0 else 0
+            size_hint: None, None
+            size: self.minimum_width, dp(24)
+            canvas.before:
+                Color:
+                    rgba: APP_COLORS['border'] if root.is_in_completed_list else (APP_COLORS['red'] + [0.15])
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.size
+                    radius: [dp(6)]
+            Label:
+                text: root.card_obj.get_priority_display() if root.card_obj else ''
+                font_size: '13sp'
+                bold: True
+                color: APP_COLORS['text_secondary'] if root.is_in_completed_list else APP_COLORS['red']
+                size_hint: None, None
+                size: self.texture_size
+                padding: (dp(2), dp(4))
 
+        # Overdue Tag
         BoxLayout:
             opacity: 1 if root.is_overdue and not root.is_in_completed_list else 0
             size_hint: None, None
@@ -824,6 +874,7 @@
                 size: self.texture_size
                 size_hint: None, None
 
+    # Description
     Label:
         text: root.card_obj.description if root.card_obj else ''
         font_size: '12sp'
@@ -834,31 +885,13 @@
         size_hint_y: None
         height: self.texture_size[1]
 
+    # This is the bottom row of the card
     BoxLayout:
         size_hint_y: None
         height: dp(30)
         spacing: dp(8)
 
-        # Priority ❗❗❗
-        BoxLayout:
-            opacity: 1 if root.card_obj and root.card_obj.priority > 0 else 0
-            size_hint: None, None
-            size: self.minimum_width, dp(24)
-            padding: (dp(8), dp(4))
-            canvas.before:
-                Color:
-                    rgba: APP_COLORS['red'] + [0.15]
-                RoundedRectangle:
-                    pos: self.pos
-                    size: self.size
-                    radius: [dp(6)]
-            Label:
-                markup: True
-                text: root.card_obj.get_priority_display()
-                font_size: '10sp'
-                color: APP_COLORS['red']
-                size_hint: None, None
-                size: self.texture_size
+        # Priority Indicator was moved from here
 
         # Deadline
         Label:
@@ -872,8 +905,10 @@
             halign: 'left'
             valign: 'middle'
 
+        # Spacer
         Widget:
 
+        # Context menu button
         Button:
             text: '\uf142'
             font_name: NERD_FONT
@@ -883,6 +918,7 @@
             background_color: 0,0,0,0
             color: APP_COLORS['text_secondary']
 
+# A popup for creating or editing a card's details.
 <CardPopup>:
     size_hint: 0.9, None
     height: content_box.height
@@ -924,7 +960,31 @@
             hint_text: "Description"
             size_hint_y: None
             height: dp(88)
-        
+
+        # Priority Slider - Only shows when creating a new card
+        BoxLayout:
+            size_hint_y: None
+            height: dp(48) if not root.card_obj else 0
+            opacity: 1 if not root.card_obj else 0
+            disabled: True if root.card_obj else False
+            spacing: dp(10)
+            Label:
+                text: 'Priority:'
+                size_hint_x: None
+                width: dp(80)
+                color: APP_COLORS['text']
+            Slider:
+                id: priority_slider
+                min: 0
+                max: 5
+                step: 1
+                value: 0
+            Label:
+                text: str(int(priority_slider.value))
+                size_hint_x: None
+                width: dp(20)
+                color: APP_COLORS['text']
+
         Button:
             id: card_deadline_button
             text: "Set Deadline"
@@ -945,7 +1005,7 @@
                 Line:
                     width: dp(1)
                     rounded_rectangle: (self.x, self.y, self.width, self.height, dp(8))
-            
+        
         BoxLayout:
             size_hint_y: None
             height: dp(48)

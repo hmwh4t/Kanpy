@@ -24,7 +24,6 @@ pycparser==2.22
 Pygments==2.19.1
 pyproject_hooks==1.2.0
 requests==2.32.4
-setuptools==80.9.0
 sh==1.14.3
 toml==0.10.2
 tomli==2.2.1
