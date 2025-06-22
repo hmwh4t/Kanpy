@@ -12,7 +12,8 @@ from kivy.utils import get_color_from_hex
 from kivy.graphics import Color, Rectangle
 from kivy.lang import Builder
 from kivy.uix.behaviors import ButtonBehavior
-from app_classes import WorkspaceManager # I am assuming this file exists and works as intended
+# from app_classes import WorkspaceManager # I am assuming this file exists and works as intended
+from app_classes import WorkspaceManager, Card
 
 APP_COLORS = {
     "background": get_color_from_hex("#FAFAFA"),
@@ -153,7 +154,39 @@ class WorkspaceCard(ButtonBehavior, BoxLayout):
 
 class ListWidget(BoxLayout):
     list_name = StringProperty('')
-    board_widget = ObjectProperty(None)
+    list_obj = ObjectProperty(None) 
+
+    def __init__(self, list_obj, **kwargs):
+        super().__init__(**kwargs)
+        self.list_obj = list_obj
+        self.list_name = list_obj.name
+        Clock.schedule_once(self.populate_cards)
+
+    def populate_cards(self, *args):
+        cards_container = self.ids.cards_container
+        cards_container.clear_widgets()
+        for card in self.list_obj.cards():
+            cards_container.add_widget(CardWidget(card_obj=card, list_widget=self))
+
+    def add_card_popup(self):
+        CardPopup(list_widget=self).open()
+
+    def delete_card_popup(self, card_obj):
+        confirm_popup = ConfirmationDialog(
+            title="Delete Card",
+            message=f"Move card '{card_obj.name}' to the bin?",
+            on_confirm=lambda: self.confirm_delete_card(card_obj)
+        )
+        confirm_popup.open()
+        
+    def confirm_delete_card(self, card_obj):
+        board = App.get_running_app().workspace_manager.current_workspace().selected_board()
+        if board.delete_card(self.list_obj.list_id, card_obj.card_id):
+            App.get_running_app().workspace_manager.save_current_workspace()
+            self.populate_cards()
+            App.get_running_app().show_toast(f"Card '{card_obj.name}' moved to bin.")
+        else:
+            App.get_running_app().show_toast(f"Error deleting card.")
 
     # The context menu is now opened only by the dedicated button in the kv file
     def open_context_menu(self):
@@ -203,7 +236,7 @@ class BoardWidget(RelativeLayout):
             self.ids.empty_board_label.opacity = 0
             self.ids.scroll_view.opacity = 1
             for list_obj in self.board.list_objects():
-                lists_container.add_widget(ListWidget(list_name=list_obj.name, board_widget=self))
+                lists_container.add_widget(ListWidget(list_obj=list_obj))
 
     def add_new_list_popup(self):
         TextInputPopup(title="Add New List", hint_text="Enter list name", callback=self.add_new_list_callback).open()
@@ -411,6 +444,63 @@ class BinScreen(Screen):
         self.manager.current = 'board'
 
 
+class CardPopup(ModalView):
+    # card_obj=None 
+    # card_obj=Card(...)
+    card_obj = ObjectProperty(None, allownone=True)
+    list_widget = ObjectProperty(None)
+
+    def __init__(self, list_widget, card_obj=None, **kwargs):
+        super().__init__(**kwargs)
+        self.list_widget = list_widget
+        self.card_obj = card_obj
+        
+        if self.card_obj: 
+            self.ids.card_name_input.text = self.card_obj.name
+            self.ids.card_desc_input.text = self.card_obj.description
+
+    def save_card(self):
+        card_name = self.ids.card_name_input.text.strip()
+        card_desc = self.ids.card_desc_input.text.strip()
+        deadline_str = self.ids.card_deadline_input.text.strip()
+
+        if not card_name:
+            App.get_running_app().show_toast("Card name cannot be empty.")
+            return
+
+        card_deadline = None
+
+        if deadline_str:
+            try:
+                card_deadline = datetime.datetime.strptime(deadline_str, "%Y-%m-%d %H:%M").astimezone()
+            except ValueError:
+                App.get_running_app().show_toast("Invalid deadline format. Use YYYY-MM-DD HH:MM.")
+                return
+
+        board = App.get_running_app().workspace_manager.current_workspace().selected_board()
+        
+        if self.card_obj: 
+            self.card_obj.name = card_name
+            self.card_obj.description = card_desc
+            self.card_obj.deadline = card_deadline
+            board.notification_manager.register_notification(self.card_obj)
+        else: 
+            new_card = Card(name=card_name, description=card_desc, deadline=card_deadline)
+            self.list_widget.list_obj.add_card(new_card) 
+            board.notification_manager.register_notification(new_card)
+
+        App.get_running_app().workspace_manager.save_current_workspace()
+        self.list_widget.populate_cards()
+        self.dismiss()
+
+
+class CardWidget(BoxLayout):
+    card_obj = ObjectProperty(None)
+    list_widget = ObjectProperty(None)
+
+    def open_edit_popup(self):
+        CardPopup(list_widget=self.list_widget, card_obj=self.card_obj).open()
+
 class KanbanApp(App):
     def build(self):
         self.workspace_manager = WorkspaceManager()
@@ -428,6 +518,17 @@ class KanbanApp(App):
         self.sm.add_widget(BoardScreen(name='board'))
         self.sm.add_widget(BinScreen(name='bin_screen'))
         return self.sm
+
+    def on_start(self):
+        Clock.schedule_interval(self.check_notifications, 60)
+
+    def check_notifications(self, *args):
+        if self.workspace_manager.current_workspace():
+            board = self.workspace_manager.current_workspace().selected_board()
+            if board and hasattr(board, 'notification_manager'):
+                due_notifications = board.notification_manager.check_and_get_due_notifications()
+                for msg in due_notifications:
+                    self.show_toast(msg)
 
     def update_background_rect(self, instance, value):
         self.background_rect.pos = instance.pos

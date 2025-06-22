@@ -7,39 +7,42 @@ import uuid # Added for unique IDs
 
 # --- Card Class (Improved) ---
 class Card():
-    def __init__(self, name, description="None", card_id=None):
-        self.card_id = card_id if card_id else self._generate_id()
+    def __init__(self, name, description="None", card_id=None, deadline=None):
+        self.card_id = card_id if card_id else str(uuid.uuid4())
         self.name = name
         self.description = description
+        self.deadline = deadline
 
-    def _generate_id(self):
+    def _generate_id(self): 
         return str(uuid.uuid4())
 
-    def change_name(self, new_name):
-        self.name = new_name
-        # In a more complex app, this might notify a parent list/board to update workspace's last_edited
-
-    def change_desc(self, new_description):
-        self.description = new_description
-        # Similarly, might notify parent
-
     def to_dict(self):
+        deadline_iso = self.deadline.isoformat() if self.deadline else None
         return {
             "card_id": self.card_id,
             "name": self.name,
-            "description": self.description
+            "description": self.description,
+            "deadline": deadline_iso
         }
 
     @classmethod
     def from_dict(cls, data):
+        deadline_obj = None
+        if deadline_str := data.get("deadline"):
+            try:
+                deadline_obj = datetime.datetime.fromisoformat(deadline_str)
+            except (ValueError, TypeError):
+                pass
         return cls(
-            card_id=data.get("card_id"), # Load existing ID
+            card_id=data.get("card_id"),
             name=data.get("name", "Untitled Card"),
-            description=data.get("description", "No description")
+            description=data.get("description", "No description"),
+            deadline=deadline_obj
         )
 
     def __str__(self):
-        return f"Card ID: {self.card_id[:8]}...\nName: {self.name}\nDescription: {self.description}"
+        deadline_str = f"\nDeadline: {self.deadline.strftime('%Y-%m-%d %H:%M')}" if self.deadline else ""
+        return f"Card ID: {self.card_id[:8]}...\nName: {self.name}\nDescription: {self.description}{deadline_str}"
 
 # --- List Class (Improved) ---
 class List():
@@ -60,8 +63,8 @@ class List():
         self.description = new_description
         # Might notify parent board
 
-    def create_card(self, name, description="None"):
-        new_card = Card(name=name, description=description)
+    def create_card(self, name, description="None", deadline=None):
+        new_card = Card(name=name, description=description, deadline=deadline)
         self.cards.append(new_card)
         # Might notify parent board
         return new_card
@@ -126,6 +129,7 @@ class Board:
         self.workspace = workspace_instance # Reference to parent workspace
         self.lists = []  # Stores List objects
         self.bin = Bin()
+        self.notification_manager = NotificationManager()
 
     def _generate_id(self):
         return str(uuid.uuid4())
@@ -157,21 +161,38 @@ class Board:
     def get_all_lists(self):
         return self.lists
 
+    def delete_card(self, list_id: str, card_id: str) -> bool:
+        """Finds a card in a specific list, moves it to the bin, and disables notifications."""
+        target_list = self.get_list(list_id)
+        if not target_list:
+            return False
+            
+        card_to_delete = target_list.get_card(card_id)
+        if not card_to_delete:
+            return False
+            
+        self.notification_manager.disable_notification(card_to_delete.card_id)
+        self.bin.move_card_to_bin(card_to_delete)
+        target_list.remove_card(card_id)
+        print(f"Card '{card_to_delete.name}' moved to bin.")
+        return True
+
     def delete_list(self, list_id_to_delete: str) -> bool:
         list_to_delete = self.get_list(list_id_to_delete)
-        
         if list_to_delete:
+            for card in list_to_delete.get_all_cards():
+                self.notification_manager.disable_notification(card.card_id)
+            
             self.bin.move_list_to_bin(list_to_delete)
             self.lists = [lst for lst in self.lists if lst.list_id != list_to_delete.list_id]
             return True
-        
-        print(f"Warning: Could not find list with ID '{list_id_to_delete}' to delete.")
         return False
     
     def __str__(self):
         list_overviews = [f"  - List: '{l.list_name}' (ID: {l.list_id[:8]}..., {len(l.cards)} cards)" for l in self.lists]
         lists_str = "\n".join(list_overviews) if list_overviews else "  No lists on this board yet."
-        return f"Board ID: {self.board_id[:8]}...\nName: '{self.name}'\nLists ({len(self.lists)}):\n{lists_str}"
+        bin_info = f"Bin: ({len(self.bin.archived_lists)} lists, {len(self.bin.archived_cards)} cards)" 
+        return f"Board ID: {self.board_id[:8]}...\nName: '{self.name}'\nLists ({len(self.lists)}):\n{lists_str}\n{bin_info}"
 
     def to_dict(self):
         return {
@@ -191,10 +212,12 @@ class Board:
 
         list_data_list = data.get("lists", [])
         for list_data in list_data_list:
-            board_obj.add_list(List.from_dict(list_data))
-
-        bin_data = data.get("bin")
-        if bin_data:
+            new_list = List.from_dict(list_data)
+            board_obj.add_list(new_list)
+            for card in new_list.get_all_cards():
+                board_obj.notification_manager.register_notification(card)
+        
+        if bin_data := data.get("bin"):
             board_obj.bin = Bin.from_dict(bin_data)
 
         return board_obj
@@ -698,15 +721,43 @@ def manage_board_menu(board: Board, wm: workspace_manager):
             "Create New List",
             "Select List to Manage",
             "Rename Board",
-            "Delete List (Select)",
+            "Move List to Bin (Select)",
+            "View Bin",                
+            "Check Notifications",     
             "Back to Workspace Menu"
         ]
         action = easygui.buttonbox(prompt, f"Board: {board.name}", choices)
 
         if action is None or action == "Back to Workspace Menu":
             break
-        
-        if action == "Create New List":
+
+        if action == "View Bin":
+            deleted_lists = board.bin.get_deleted_lists() 
+            deleted_cards = board.bin.archived_cards 
+            
+            msg = "--- ITEMS IN BIN ---\n\n"
+            msg += "DELETED LISTS:\n"
+            if deleted_lists:
+                for lst in deleted_lists: msg += f"- {lst.list_name}\n"
+            else:
+                msg += "- None\n"
+            
+            msg += "\nDELETED CARDS:\n"
+            if deleted_cards:
+                for card in deleted_cards: msg += f"- {card.name}\n"
+            else:
+                msg += "- None\n"
+            
+            easygui.msgbox(msg, "Bin Contents")
+
+        elif action == "Check Notifications":
+            due_msgs = board.notification_manager.check_and_get_due_notifications()
+            if due_msgs:
+                easygui.msgbox("\n".join(due_msgs), "Deadline Alerts!")
+            else:
+                easygui.msgbox("No notifications are due at the moment.", "Notifications")        
+
+        elif action == "Create New List":
             list_fields = ["Name", "Description (optional)"]
             list_values = easygui.multenterbox("Enter details for the new list:", "Create List", list_fields)
             if list_values:
@@ -737,19 +788,19 @@ def manage_board_menu(board: Board, wm: workspace_manager):
                 board.change_name(new_name)
                 easygui.msgbox(f"Board renamed to '{new_name}'. Remember to save.", "Board Renamed")
 
-        elif action == "Delete List (Select)":
+        elif action == "Move List to Bin (Select)":
             if not board.get_all_lists():
                 easygui.msgbox("No lists on this board to delete.", "Delete List")
                 continue
             list_choices_dict = {f"{l.list_name} (ID: {l.list_id[:8]})": l.list_id for l in board.get_all_lists()}
             list_id_to_delete = safe_choicebox("Select a list to DELETE:", "Delete List", list_choices_dict)
             if list_id_to_delete:
-                list_to_delete = board.get_list(list_id_to_delete)
-                if easygui.ynbox(f"Are you sure you want to delete list '{list_to_delete.list_name}' and all its cards?", "Confirm Deletion"):
+                list_to_delete_obj = board.get_list(list_id_to_delete)
+                if easygui.ynbox(f"Are you sure you want to move list '{list_to_delete_obj.list_name}' to the bin?", "Confirm Action"):
                     if board.delete_list(list_id_to_delete):
-                        easygui.msgbox(f"List '{list_to_delete.list_name}' deleted. Remember to save.", "List Deleted")
+                        easygui.msgbox(f"List '{list_to_delete_obj.list_name}' moved to bin.", "Success")
                     else:
-                        easygui.msgbox(f"Failed to delete list '{list_to_delete.list_name}'.", "Error")
+                        easygui.msgbox(f"Failed to move list.", "Error")
 
 
 def manage_list_menu(current_list: List, board: Board, wm: workspace_manager):
@@ -760,6 +811,7 @@ def manage_list_menu(current_list: List, board: Board, wm: workspace_manager):
         choices = [
             "Create New Card",
             "View/Select Card", # To view details or edit/delete
+            "Delete Card",
             "Edit List Details",
             "Delete This List",
             "Back to Board Menu"
@@ -770,15 +822,42 @@ def manage_list_menu(current_list: List, board: Board, wm: workspace_manager):
             break
 
         if action == "Create New Card":
-            card_fields = ["Name", "Description (optional)"]
+            card_fields = ["Name", "Description (optional)", "Deadline (YYYY-MM-DD HH:MM)"]
             card_values = easygui.multenterbox("Enter details for the new card:", "Create Card", card_fields)
             if card_values:
-                card_name, card_desc = card_values
-                if card_name:
-                    current_list.create_card(card_name, card_desc or "None")
-                    easygui.msgbox(f"Card '{card_name}' created in list '{current_list.list_name}'. Remember to save.", "Card Created")
+                card_name, card_desc, deadline_str = card_values
+
+                if card_name and card_name.strip():
+                    card_deadline = None
+                    if deadline_str:
+                        try:
+                            card_deadline = datetime.datetime.strptime(deadline_str, "%Y-%m-%d %H:%M")
+                        except ValueError:
+                            easygui.msgbox("Invalid deadline format. Please use YYYY-MM-DD HH:MM.", "Error")
+                            continue
+                    
+                    new_card = current_list.create_card(card_name, card_desc or "None", deadline=card_deadline)
+                    
+                    if new_card.deadline:
+                        board.notification_manager.register_notification(new_card)
+
+                    easygui.msgbox(f"Card '{card_name}' created.", "Card Created")
                 else:
                     easygui.msgbox("Card name cannot be empty.", "Error")
+
+        elif action == "Delete Card":
+            if not current_list.get_all_cards():
+                easygui.msgbox("No cards in this list to delete.", "Delete Card")
+                continue
+            
+            card_choices_dict = {f"{c.name} (ID: {c.card_id[:8]})": c.card_id for c in current_list.get_all_cards()}
+            chosen_card_id = safe_choicebox("Select a card to move to bin:", "Delete Card", card_choices_dict)
+
+            if chosen_card_id:
+                if board.delete_card(current_list.list_id, chosen_card_id):
+                    easygui.msgbox("Card moved to bin.", "Success")
+                else:
+                    easygui.msgbox("Failed to move card to bin.", "Error") 
         
         elif action == "View/Select Card":
             if not current_list.get_all_cards():

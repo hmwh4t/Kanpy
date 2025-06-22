@@ -322,6 +322,24 @@
                 shorten: True
                 shorten_from: 'right'
                 ellipsis_options: {'color':(1,0.5,0.5,1),'underline':True}
+            Button:
+                text: "+"
+                font_size: '20sp'
+                size_hint_x: None
+                width: dp(40)
+                on_press: root.add_card_popup()
+            ScrollView:
+                do_scroll_x: False
+                do_scroll_y: True
+                bar_width: dp(10)
+                BoxLayout:
+                    id: cards_container
+                    orientation: 'vertical'
+                    padding: dp(8)
+                    spacing: dp(8)
+                    size_hint_y: None
+                    height: self.minimum_height
+
         # --- UPDATED LIST OPTIONS BUTTON WITH NERDFONT ICON ---
         Button:
             id: options_button
@@ -586,3 +604,95 @@
                 height: self.minimum_height
                 spacing: dp(2)
                 padding: dp(2)
+
+<CardWidget>:
+    orientation: 'vertical'
+    size_hint_y: None
+    height: dp(100)
+    padding: dp(8)
+    spacing: dp(4)
+    canvas.before:
+        Color:
+            rgba: APP_COLORS['card']
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(8)]
+        Color:
+            rgba: APP_COLORS['border']
+        Line:
+            rounded_rectangle: (self.pos[0], self.pos[1], self.size[0], self.size[1], dp(8))
+            width: 1.2
+
+    Label:
+        text: root.card_obj.name if root.card_obj else ''
+        font_size: '16sp'
+        color: APP_COLORS['text']
+        halign: 'left'
+        valign: 'top'
+        size_hint_y: None
+        height: self.texture_size[1]
+        text_size: self.width, None
+        bold: True
+    
+    Label:
+        text: root.card_obj.description if root.card_obj else ''
+        font_size: '12sp'
+        color: APP_COLORS['text_secondary']
+        halign: 'left'
+        valign: 'top'
+        text_size: self.width, None
+
+    BoxLayout:
+        size_hint_y: None
+        height: dp(24)
+        spacing: dp(8)
+        Button:
+            text: "Edit"
+            size_hint_x: None
+            width: dp(60)
+            on_press: root.open_edit_popup()
+        Button:
+            text: "Delete"
+            size_hint_x: None
+            width: dp(70)
+            on_press: root.list_widget.delete_card_popup(root.card_obj)
+
+
+<CardPopup>:
+    size_hint: 0.8, 0.6
+    auto_dismiss: False
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(10)
+
+        Label:
+            text: "Edit Card" if root.card_obj else "Create New Card"
+            font_size: '20sp'
+            size_hint_y: None
+            height: dp(40)
+
+        TextInput:
+            id: card_name_input
+            hint_text: "Card Name"
+            multiline: False
+
+        TextInput:
+            id: card_desc_input
+            hint_text: "Description"
+        
+        TextInput:
+            id: card_deadline_input
+            hint_text: "Deadline (YYYY-MM-DD HH:MM)"
+            multiline: False
+            
+        BoxLayout:
+            size_hint_y: None
+            height: dp(40)
+            Button:
+                text: "Save"
+                on_press: root.save_card()
+            Button:
+                text: "Cancel"
+                on_press: root.dismiss()
