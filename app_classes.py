@@ -55,6 +55,16 @@ class Card:
         self.deadline = deadline
         self.priority = priority
         self.completed = False
+
+    def is_overdue(self) -> bool:
+        """Check if the card's deadline is in the past."""
+        if not self.deadline:
+            return False
+        try:
+            deadline_date = datetime.datetime.strptime(self.deadline, '%Y-%m-%d %H:%M').date()
+            return deadline_date < datetime.date.today()
+        except (ValueError, TypeError):
+            return False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert card to dictionary representation."""
@@ -71,7 +81,6 @@ class Card:
         )
         card.completed = data.get("completed", False)
         return card
-
 
 class ListObject:
     """Represents a list containing multiple cards."""
@@ -93,6 +102,19 @@ class ListObject:
         """Add a card to this list."""
         self._cards.append(card_obj)
     
+    def delete_card(self, card_obj_to_delete: Card) -> bool:
+        """Delete a card from this list by object reference."""
+        try:
+            self._cards.remove(card_obj_to_delete)
+            return True
+        except ValueError:
+            # Card was not found in the list
+            return False
+    
+    def _find_card_by_name(self, card_name: str) -> Optional[Card]:
+        """Find a card in this list by name."""
+        return next((card for card in self._cards if card.name == card_name), None)
+
     def rename_list(self, new_name: str) -> bool:
         """Rename this list. Returns True if successful."""
         if new_name:
@@ -119,18 +141,31 @@ class ListObject:
 
 
 class Bin:
-    """Represents a recycle bin for deleted lists."""
+    """Represents a recycle bin for deleted lists and cards."""
     
     def __init__(self):
         self._deleted_lists: List[ListObject] = []
+        self._deleted_cards: List[Dict[str, Any]] = []  # Store card with source list info
     
     def add_list(self, list_obj: ListObject) -> None:
         """Add a deleted list to the bin."""
         self._deleted_lists.append(list_obj)
     
+    def add_card(self, card_obj: Card, source_list_name: str) -> None:
+        """Add a deleted card to the bin with source list information."""
+        self._deleted_cards.append({
+            "card": card_obj,
+            "source_list": source_list_name,
+            "deleted_at": datetime.datetime.now().isoformat()
+        })
+    
     def get_deleted_lists(self) -> List[ListObject]:
         """Get all deleted lists in the bin."""
         return self._deleted_lists
+    
+    def get_deleted_cards(self) -> List[Dict[str, Any]]:
+        """Get all deleted cards in the bin."""
+        return self._deleted_cards
     
     def restore_list(self, list_name: str) -> Optional[ListObject]:
         """Restore a list from the bin by name."""
@@ -138,6 +173,18 @@ class Bin:
         if list_to_restore:
             self._deleted_lists.remove(list_to_restore)
         return list_to_restore
+    
+    def restore_card(self, card_name: str, board: 'Board') -> Optional[Dict[str, Any]]:
+        """Restore a card from the bin by name, only if the source list exists."""
+        card_entry = self._find_card_by_name(card_name)
+        if card_entry:
+            source_list_name = card_entry["source_list"]
+            # Check if the source list exists in the board
+            source_list = board._find_list_by_name(source_list_name)
+            if source_list:
+                self._deleted_cards.remove(card_entry)
+                return card_entry
+        return None
     
     def permanently_delete_list(self, list_name: str) -> bool:
         """Permanently delete a list from the bin."""
@@ -147,33 +194,64 @@ class Bin:
             return True
         return False
     
+    def permanently_delete_card(self, card_name: str) -> bool:
+        """Permanently delete a card from the bin."""
+        card_entry = self._find_card_by_name(card_name)
+        if card_entry:
+            self._deleted_cards.remove(card_entry)
+            return True
+        return False
+    
     def _find_list_by_name(self, list_name: str) -> Optional[ListObject]:
         """Find a list in the bin by name."""
         return next((lst for lst in self._deleted_lists if lst.name == list_name), None)
     
+    def _find_card_by_name(self, card_name: str) -> Optional[Dict[str, Any]]:
+        """Find a card in the bin by name."""
+        return next((entry for entry in self._deleted_cards if entry["card"].name == card_name), None)
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert bin to dictionary representation."""
         return {
-            "lists": [lst.to_dict() for lst in self._deleted_lists]
+            "lists": [lst.to_dict() for lst in self._deleted_lists],
+            "cards": [
+                {
+                    "card": entry["card"].to_dict(),
+                    "source_list": entry["source_list"],
+                    "deleted_at": entry["deleted_at"]
+                }
+                for entry in self._deleted_cards
+            ]
         }
     
     @classmethod
     def from_dict(cls, data: Optional[Dict[str, Any]]) -> 'Bin':
         """Create a Bin instance from dictionary data."""
         bin_instance = cls()
-        if data and "lists" in data:
-            bin_instance._deleted_lists = [
-                ListObject.from_dict(list_data) 
-                for list_data in data.get("lists", [])
-            ]
+        if data:
+            if "lists" in data:
+                bin_instance._deleted_lists = [
+                    ListObject.from_dict(list_data) 
+                    for list_data in data.get("lists", [])
+                ]
+            if "cards" in data:
+                bin_instance._deleted_cards = [
+                    {
+                        "card": Card.from_dict(entry["card"]),
+                        "source_list": entry["source_list"],
+                        "deleted_at": entry["deleted_at"]
+                    }
+                    for entry in data.get("cards", [])
+                ]
         return bin_instance
 
 
 class Board:
     """Represents a board containing multiple lists and a recycle bin."""
     
-    def __init__(self, name: str = "Default Board", lists: Optional[List[Dict[str, Any]]] = None, bin_data: Optional[Dict[str, Any]] = None):
+    def __init__(self, name: str = "Default Board", lists: Optional[List[Dict[str, Any]]] = None, bin_data: Optional[Dict[str, Any]] = None, completed_list_name: Optional[str] = None):
         self.name = name
+        self.completed_list_name = completed_list_name
         
         if lists:
             self._list_objects = [ListObject.from_dict(list_data) for list_data in lists]
@@ -203,8 +281,43 @@ class Board:
         """Delete a list by moving it to the bin."""
         list_to_delete = self._find_list_by_name(list_name)
         if list_to_delete:
+            if self.completed_list_name == list_name:
+                self.completed_list_name = None
             self._list_objects.remove(list_to_delete)
             self.bin.add_list(list_to_delete)
+            return True
+        return False
+    
+    def delete_card(self, list_name: str, card_to_delete: Card) -> bool:
+        """Finds a list, moves a card to the bin, and then deletes it from the list."""
+        list_obj = self._find_list_by_name(list_name)
+        if not list_obj:
+            return False
+
+        self.bin.add_card(card_to_delete, source_list_name=list_name)
+        return list_obj.delete_card(card_to_delete)
+
+    def set_completed_list(self, list_name: Optional[str]):
+        """Set or unset a list as the completed list."""
+        if list_name and not self._find_list_by_name(list_name):
+            return False # List doesn't exist
+        self.completed_list_name = list_name
+        return True
+
+    def get_completed_list_name(self) -> Optional[str]:
+        """Get the name of the completed list."""
+        return self.completed_list_name
+
+    def move_card(self, card_to_move: Card, source_list_name: str, dest_list_name: str) -> bool:
+        """Move a card from a source list to a destination list."""
+        source_list = self._find_list_by_name(source_list_name)
+        dest_list = self._find_list_by_name(dest_list_name)
+
+        if not source_list or not dest_list or source_list_name == dest_list_name:
+            return False
+
+        if source_list.delete_card(card_to_move):
+            dest_list.add_card(card_to_move)
             return True
         return False
     
@@ -228,7 +341,8 @@ class Board:
         return {
             "name": self.name,
             "lists": [lst.to_dict() for lst in self._list_objects],
-            "bin": self.bin.to_dict()
+            "bin": self.bin.to_dict(),
+            "completed_list_name": self.completed_list_name
         }
     
     @classmethod
@@ -237,7 +351,8 @@ class Board:
         return cls(
             name=data.get("name", "Default Board"),
             lists=data.get("lists", []),
-            bin_data=data.get("bin")
+            bin_data=data.get("bin"),
+            completed_list_name=data.get("completed_list_name")
         )
 
 
