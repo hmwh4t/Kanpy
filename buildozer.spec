@@ -17,14 +17,15 @@ package.icon = %(source.dir)s/icon.png
 source.dir = .
 
 # (list) Source files to include. Make sure to include all necessary file types.
-source.include_exts = py,png,jpg,kv,txt,md
+source.include_exts = png,jpg,kv,py,txt,ttf,json
+source.include_patterns = *.py,*.kv,*.txt,*.ttf,*.json
 
 # (list) List of directories to exclude
 # We exclude venv to keep the package small.
 source.exclude_dirs = tests, bin, venv, .venv, __pycache__
 
 # (str) Application versioning
-version = 0.1
+version = 0.5
 
 # (list) Application requirements
 # All the python packages your app needs.
