@@ -25,7 +25,7 @@ source.include_patterns = *.py,*.kv,*.txt,*.ttf,*.json
 source.exclude_dirs = tests, bin, venv, .venv, __pycache__
 
 # (str) Application versioning
-version = 1.0
+version = 1.0.5
 
 # (list) Application requirements
 # All the python packages your app needs.

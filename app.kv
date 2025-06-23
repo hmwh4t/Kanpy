@@ -234,6 +234,9 @@
             text: 'Rename Board'
             on_press: root.board_screen.rename_current_board_popup(); root.dismiss()
         DialogButton:
+            text: 'Rearrange Lists'
+            on_press: root.dismiss(); root.board_screen.open_rearrange_dialog()
+        DialogButton:
             text: 'Open Bin'
             on_press: root.open_bin()
         DialogButton:
@@ -1030,6 +1033,107 @@
             Button:
                 text: "Save"
                 on_press: root.save_card()
+                background_color: 0,0,0,0
+                color: APP_COLORS['white']
+                canvas.before:
+                    Color:
+                        rgba: APP_COLORS['primary']
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(24),]
+
+<DraggableListItem>:
+    size_hint_y: None
+    height: dp(56)
+    list_name: ''
+    is_dragged: False
+    canvas.before:
+        Color:
+            rgba: APP_COLORS['hover'] if root.is_dragged else APP_COLORS['white']
+        Rectangle:
+            pos: self.pos
+            size: self.size
+        Color:
+            rgba: APP_COLORS['border']
+        Line:
+            points: self.x, self.y, self.x + self.width, self.y
+    Label:
+        text: "::"
+        font_name: NERD_FONT
+        size_hint_x: None
+        width: dp(40)
+        color: APP_COLORS['text_secondary']
+    Label:
+        text: root.list_name
+        color: APP_COLORS['text']
+        halign: 'left'
+        valign: 'middle'
+        text_size: self.size
+
+<RearrangeListsPopup>:
+    size_hint: 0.85, 0.8
+    auto_dismiss: False
+    board: None
+    board_screen: None
+    background_color: 0, 0, 0, .5
+    BoxLayout:
+        orientation: 'vertical'
+        padding: '15dp'
+        spacing: '10dp'
+        pos_hint: {'center_x': .5, 'center_y': .5}
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['white']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(15),]
+        Label:
+            text: "Rearrange Lists"
+            font_size: '20sp'
+            size_hint_y: None
+            height: '40dp'
+            bold: True
+            color: APP_COLORS['text']
+        Label:
+            text: "Hold and drag a list to change its order"
+            font_size: '14sp'
+            size_hint_y: None
+            height: self.texture_size[1]
+            color: APP_COLORS['text_secondary']
+        ScrollView:
+            bar_width: dp(4)
+            GridLayout:
+                id: lists_container
+                cols: 1
+                spacing: dp(2)
+                size_hint_y: None
+                height: self.minimum_height
+        BoxLayout:
+            size_hint_y: None
+            height: dp(48)
+            spacing: dp(10)
+            Button:
+                text: "Cancel"
+                on_press: root.dismiss()
+                background_color: 0,0,0,0
+                color: APP_COLORS['text_secondary']
+                canvas.before:
+                    Color:
+                        rgba: APP_COLORS['white']
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(24),]
+                    Color:
+                        rgba: APP_COLORS['border']
+                    Line:
+                        width: dp(1)
+                        rounded_rectangle: (self.x, self.y, self.width, self.height, dp(24))
+            Button:
+                text: "Save"
+                on_press: root.save_order()
                 background_color: 0,0,0,0
                 color: APP_COLORS['white']
                 canvas.before:

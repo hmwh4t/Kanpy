@@ -686,6 +686,17 @@ class BoardScreen(Screen):
     def open_board_options(self):
         BoardOptionsDialog(board_screen=self).open()
 
+    def open_rearrange_dialog(self):
+        """Opens the dialog to rearrange lists if there's more than one."""
+        workspace = App.get_running_app().workspace_manager.current_workspace()
+        if workspace:
+            board = workspace.selected_board()
+            if board and len(board.list_objects()) > 1:
+                popup = RearrangeListsPopup(board=board, board_screen=self)
+                popup.open()
+            elif board:
+                App.get_running_app().show_toast("Not enough lists to rearrange.")
+
     def go_back_to_workspaces(self):
         """Saves the current workspace and returns to the workspace screen."""
         app = App.get_running_app()
@@ -769,6 +780,76 @@ class BinScreen(Screen):
         """Navigates back to the main board screen."""
         self.manager.get_screen('board').load_current_board()
         self.manager.current = 'board'
+
+class DraggableListItem(BoxLayout):
+    """A list item that can be dragged to reorder."""
+    list_name = StringProperty('')
+    is_dragged = BooleanProperty(False)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            touch.grab(self)
+            self.is_dragged = True
+            return True
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            parent = self.parent
+            my_index_in_children = parent.children.index(self)
+
+            # Find which widget we are hovering over
+            for i, child in enumerate(parent.children):
+                if child is self:
+                    continue
+                if child.collide_point(*touch.pos):
+                    if i != my_index_in_children:
+                        parent.remove_widget(self)
+                        parent.add_widget(self, index=i)
+                    break
+            return True
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            self.is_dragged = False
+            return True
+        return super().on_touch_up(touch)
+
+class RearrangeListsPopup(ModalView):
+    """A popup for rearranging the order of lists on a board."""
+    board = ObjectProperty(None)
+    board_screen = ObjectProperty(None)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        Clock.schedule_once(self.populate_lists)
+
+    def populate_lists(self, *args):
+        self.ids.lists_container.clear_widgets()
+        if self.board:
+            for list_obj in self.board.list_objects():
+                item = DraggableListItem(list_name=list_obj.name)
+                self.ids.lists_container.add_widget(item)
+
+    def save_order(self):
+        if not self.board:
+            self.dismiss()
+            return
+            
+        new_order_widgets = self.ids.lists_container.children[::-1]
+        new_order_names = [widget.list_name for widget in new_order_widgets]
+        
+        original_lists_map = {lst.name: lst for lst in self.board.list_objects()}
+        
+        reordered_list_objects = [original_lists_map[name] for name in new_order_names if name in original_lists_map]
+        
+        self.board._list_objects = reordered_list_objects
+        
+        App.get_running_app().workspace_manager.save_current_workspace()
+        self.board_screen.load_current_board()
+        self.dismiss()
 
 class KanbanApp(App):
     """The main application class."""
