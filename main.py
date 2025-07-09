@@ -88,6 +88,8 @@ class CalendarWidget(GridLayout):
 
     def update_calendar(self, *args):
         """Redraws the calendar grid for the current month and year."""
+        if self.popup:
+            self.popup.ids.month_year_label.text = self.current_date.strftime('%B %Y')
         self.clear_widgets()
         year = self.current_date.year
         month = self.current_date.month
