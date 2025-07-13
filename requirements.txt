@@ -1,4 +1,5 @@
 appdirs==1.4.4
+androidstorage4kivy==1.0.0
 build==1.2.2.post1
 buildozer==1.5.0
 certifi==2025.4.26

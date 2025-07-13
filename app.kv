@@ -23,11 +23,14 @@
         halign: 'center'
         canvas.before:
             Color:
-                rgba: [0.1, 0.1, 0.1, 0.9]
+                rgba: 0, 0, 0, 0.8
             RoundedRectangle:
                 pos: self.pos
                 size: self.size
-                radius: [dp(15),]
+                radius: [dp(10),]
+
+# A special button for creating workspaces that supports long press for import
+<CreateWorkspaceButton>:
 
 # A styled button for use in dialogs and context menus.
 <DialogButton@Button>:
@@ -174,6 +177,156 @@
         DialogButton:
             text: 'Change Password' if root.is_encrypted else 'Add Password'
             on_press: app.set_workspace_password(root.workspace_name); root.dismiss()
+        DialogButton:
+            text: 'Export to Storage'
+            on_press: root.export_workspace()
+        DialogButton:
+            text: 'Delete'
+            color: APP_COLORS['red']
+            on_press: app.delete_workspace(root.workspace_name); root.dismiss()
+
+# A dialog for importing workspace files
+<WorkspaceImportDialog>:
+    size_hint: 0.8, None
+    height: content_box.height
+    background_color: 0, 0, 0, .5
+    BoxLayout:
+        id: content_box
+        orientation: 'vertical'
+        size_hint_y: None
+        height: self.minimum_height
+        padding: '20dp'
+        spacing: '15dp'
+        pos_hint: {'center_x': .5, 'center_y': .5}
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['white']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(15),]
+        Label:
+            text: 'Import Workspace'
+            font_size: '22sp'
+            size_hint_y: None
+            height: '40dp'
+            bold: True
+            color: APP_COLORS['text']
+        Label:
+            text: 'Select a workspace ZIP file to import'
+            font_size: '16sp'
+            size_hint_y: None
+            height: '30dp'
+            color: APP_COLORS['text_secondary']
+        BoxLayout:
+            size_hint_y: None
+            height: '50dp'
+            spacing: '10dp'
+            Button:
+                text: 'Browse Files'
+                color: APP_COLORS['white']
+                background_color: 0,0,0,0
+                on_press: root.import_workspace()
+                canvas.before:
+                    Color:
+                        rgba: APP_COLORS['primary'] if self.state == 'normal' else APP_COLORS['primary_dark']
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(8),]
+            Button:
+                text: 'Cancel'
+                color: APP_COLORS['text']
+                background_color: 0,0,0,0
+                on_press: root.dismiss()
+                canvas.before:
+                    Color:
+                        rgba: APP_COLORS['hover'] if self.state == 'down' else APP_COLORS['border']
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(8),]
+
+# ===========================
+# CARD CONTEXT MENU
+# ===========================
+
+# A context menu for a card, providing options like edit, move, delete.
+<CardContextMenu>:
+    size_hint: None, None
+    width: dp(200)
+    height: content_box.height
+    background_color: 0,0,0,0
+    auto_dismiss: True
+    pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+    BoxLayout:
+        id: content_box
+        orientation: 'vertical'
+        padding: '4dp'
+        size_hint_y: None
+        height: self.minimum_height
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['white']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(8),]
+            Color:
+                rgba: APP_COLORS['border']
+            Line:
+                width: dp(1)
+                rounded_rectangle: (self.x, self.y, self.width, self.height, dp(8))
+        DialogButton:
+            id: edit_button
+            text: "Edit"
+            on_press: root.edit_card()
+        DialogButton:
+            text: "Set Priority"
+            on_press: root.set_priority()
+            # Disable this button if the card is in a completed list
+            disabled: root.card_widget.is_in_completed_list
+        DialogButton:
+            text: "Move to Bin"
+            color: APP_COLORS['red']
+            on_press: root.delete_card()
+
+# A dialog for workspace options like renaming, changing password, or deleting.
+<WorkspaceOptionsDialog>:
+    background_color: 0, 0, 0, .5
+    size_hint: 0.85, None
+    height: content_box.height
+    BoxLayout:
+        id: content_box
+        orientation: 'vertical'
+        size_hint_y: None
+        height: self.minimum_height
+        padding: '15dp'
+        spacing: '10dp'
+        pos_hint: {'center_x': .5, 'center_y': .5}
+        canvas.before:
+            Color:
+                rgba: APP_COLORS['white']
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(15),]
+        Label:
+            text: f"Options for '{root.workspace_name}'"
+            font_size: '20sp'
+            size_hint_y: None
+            height: '40dp'
+            bold: True
+            color: APP_COLORS['text']
+        DialogButton:
+            text: 'Rename'
+            on_press: app.rename_workspace(root.workspace_name); root.dismiss()
+        DialogButton:
+            text: 'Change Password' if root.is_encrypted else 'Add Password'
+            on_press: app.set_workspace_password(root.workspace_name); root.dismiss()
+        DialogButton:
+            text: 'Export to Storage'
+            on_press: root.export_workspace()
         DialogButton:
             text: 'Delete'
             color: APP_COLORS['red']
@@ -641,21 +794,37 @@
                 padding: [dp(5), 0]
                 size_hint_y: None
                 height: self.minimum_height
-        Button:
-            text: '+ Add Workspace'
+        BoxLayout:
             size_hint_y: None
             height: '50dp'
-            font_size: '18sp'
-            color: APP_COLORS['white']
-            background_color: 0,0,0,0
-            on_press: app.create_new_workspace()
-            canvas.before:
-                Color:
-                    rgba: APP_COLORS['primary'] if self.state == 'normal' else APP_COLORS['primary_dark']
-                RoundedRectangle:
-                    pos: self.pos
-                    size: self.size
-                    radius: [dp(25),]
+            spacing: '10dp'
+            CreateWorkspaceButton:
+                text: '+ Add Workspace'
+                font_size: '18sp'
+                color: APP_COLORS['white']
+                background_color: 0,0,0,0
+                canvas.before:
+                    Color:
+                        rgba: APP_COLORS['primary'] if self.state == 'normal' else APP_COLORS['primary_dark']
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(25),]
+            Button:
+                text: 'Import'
+                size_hint_x: None
+                width: dp(100)
+                font_size: '16sp'
+                color: APP_COLORS['white']
+                background_color: 0,0,0,0
+                on_press: app.show_import_dialog()
+                canvas.before:
+                    Color:
+                        rgba: APP_COLORS['accent'] if self.state == 'normal' else APP_COLORS['primary']
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(25),]
 
 
 # The main screen for viewing and interacting with a board.

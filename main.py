@@ -5,6 +5,13 @@
 # Standard library imports
 import datetime
 import traceback
+import zipfile
+import tempfile
+import shutil
+import time
+import os
+import os
+import time
 
 # Kivy framework imports
 from kivy.app import App
@@ -27,6 +34,15 @@ from kivy.lang import Builder
 from kivy.core.text import LabelBase
 from kivy.animation import Animation
 from kivy.core.window import Window
+
+# Android specific imports (for mobile builds)
+try:
+    from android.permissions import request_permissions, Permission, check_permission
+    request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
+    from androidstorage4kivy import SharedStorage, Chooser
+    ANDROID_AVAILABLE = True
+except ImportError:
+    ANDROID_AVAILABLE = False
 
 # Local application imports
 from app_classes import WorkspaceManager, Card, Board
@@ -450,6 +466,91 @@ class WorkspaceOptionsDialog(ModalView):
         self.workspace_name = workspace_name
         self.is_encrypted = App.get_running_app().workspace_manager.is_workspace_encrypted(self.workspace_name)
 
+    def export_workspace(self):
+        """Export the workspace to Android storage as a zip file."""
+        if not ANDROID_AVAILABLE:
+            App.get_running_app().show_toast("Android storage not available on this platform")
+            self.dismiss()
+            return
+            
+        try:
+            app = App.get_running_app()
+            
+            # Check if workspace is encrypted and get password if needed
+            if self.is_encrypted:
+                TextInputPopup(
+                    title=f"Password for {self.workspace_name}",
+                    hint_text="Enter password to export",
+                    is_password=True,
+                    callback=lambda p: self._export_with_password(p)
+                ).open()
+            else:
+                self._perform_export()
+                
+        except Exception as e:
+            App.get_running_app().show_toast(f"Export error: {e}")
+        finally:
+            self.dismiss()
+
+    def _export_with_password(self, password):
+        """Export workspace after password verification."""
+        try:
+            app = App.get_running_app()
+            
+            # Verify password by trying to open the workspace
+            workspace = app.workspace_manager.open_workspace(self.workspace_name, password=password)
+            if workspace and workspace != "password_required":
+                app.workspace_manager.close_current_workspace()
+                self._perform_export()
+            else:
+                app.show_toast("Incorrect password.")
+                
+        except Exception as e:
+            App.get_running_app().show_toast(f"Password verification failed: {e}")
+
+    def _perform_export(self):
+        """Actually perform the export operation."""
+        try:
+            app = App.get_running_app()
+            
+            # Get workspace directory path
+            workspace_info = app.workspace_manager.workspaces().get(self.workspace_name)
+            if not workspace_info:
+                app.show_toast("Workspace not found")
+                return
+                
+            workspace_dir = os.path.dirname(workspace_info['path'])
+            
+            # Create a temporary zip file
+            cache_dir = SharedStorage().get_cache_dir() if ANDROID_AVAILABLE else tempfile.gettempdir()
+            zip_filename = f"{self.workspace_name}_export.zip"
+            zip_path = os.path.join(cache_dir, zip_filename)
+            
+            # Create the zip file
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(workspace_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        # Get relative path for the archive
+                        arcname = os.path.relpath(file_path, os.path.dirname(workspace_dir))
+                        zipf.write(file_path, arcname)
+            
+            # Copy to shared storage (Android Documents folder)
+            if ANDROID_AVAILABLE:
+                SharedStorage().copy_to_shared(private_file=zip_path)
+                app.show_toast(f"'{self.workspace_name}' exported to Documents folder")
+                
+                # Clean up temporary file
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+            else:
+                app.show_toast(f"Export saved to: {zip_path}")
+                
+        except Exception as e:
+            App.get_running_app().show_toast(f"Export failed: {e}")
+            print(f"Export error: {e}")
+            traceback.print_exc()
+        
 
 class BoardOptionsDialog(ModalView):
     """A dialog showing options for the current board."""
@@ -1251,6 +1352,162 @@ class RearrangeListsPopup(ModalView):
         self.dismiss()
 
 
+class WorkspaceImportDialog(ModalView):
+    """A dialog for importing workspace files."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if ANDROID_AVAILABLE:
+            try:
+                request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
+            except:
+                pass
+
+    def import_workspace(self):
+        """Opens file chooser to import a workspace."""
+        if not ANDROID_AVAILABLE:
+            App.get_running_app().show_toast("Android storage not available on this platform")
+            self.dismiss()
+            return
+            
+        try:
+            # Use Chooser to select a zip file
+            Chooser(self.chooser_callback).choose_content("application/zip")
+            self.dismiss()
+        except Exception as e:
+            App.get_running_app().show_toast(f"Error opening file chooser: {e}")
+            self.dismiss()
+
+    def chooser_callback(self, uri_list):
+        """Callback handling the file chooser result."""
+        try:
+            if not uri_list:
+                return
+                
+            for uri in uri_list:
+                # Copy the selected file to private storage
+                private_file = SharedStorage().copy_from_shared(uri)
+                self._process_imported_file(private_file)
+                break  # Only process the first file
+                
+        except Exception as e:
+            App.get_running_app().show_toast(f"Error importing file: {e}")
+
+    def _process_imported_file(self, file_path):
+        """Process the imported zip file and extract workspace."""
+        try:
+            app = App.get_running_app()
+            
+            # Create a temporary directory for extraction
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Extract the zip file
+                with zipfile.ZipFile(file_path, 'r') as zip_file:
+                    zip_file.extractall(temp_dir)
+                
+                # Look for workspace data file
+                data_file = None
+                workspace_name = None
+                
+                for root, dirs, files in os.walk(temp_dir):
+                    for file in files:
+                        if file == 'data.json':
+                            data_file = os.path.join(root, file)
+                            workspace_name = os.path.basename(root)
+                            break
+                    if data_file:
+                        break
+                
+                if not data_file or not workspace_name:
+                    app.show_toast("Invalid workspace file format")
+                    return
+                
+                # Check if workspace already exists
+                existing_workspaces = app.workspace_manager.workspaces()
+                original_name = workspace_name
+                counter = 1
+                
+                while workspace_name in existing_workspaces:
+                    workspace_name = f"{original_name}_{counter}"
+                    counter += 1
+                
+                # Copy the workspace to the workspaces directory
+                import os
+                from config import WORKSPACES_DIRECTORY
+                
+                workspace_dir = os.path.join(WORKSPACES_DIRECTORY, workspace_name)
+                shutil.copytree(os.path.dirname(data_file), workspace_dir)
+                
+                # Update the workspace manager configuration
+                app.workspace_manager._load_master_config()
+                app.workspace_manager._workspaces[workspace_name] = {
+                    'path': os.path.join(workspace_dir, 'data.json'),
+                    'encrypted': app.workspace_manager._is_file_encrypted(os.path.join(workspace_dir, 'data.json')),
+                    'last_edited': datetime.datetime.now().isoformat()
+                }
+                app.workspace_manager._save_master_config()
+                
+                app.show_toast(f"Workspace imported as '{workspace_name}'")
+                app.sm.get_screen('workspaces').populate_grid()
+                
+        except Exception as e:
+            App.get_running_app().show_toast(f"Error processing import: {e}")
+        finally:
+            # Clean up the temporary file
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except:
+                pass
+
+class CreateWorkspaceButton(Button):
+    """A special button that shows import dialog on long press (3 seconds)."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._long_press_event = None
+        self._touch_start_time = None
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            self._touch_start_time = time.time()
+            # Schedule long press after 3 seconds
+            self._long_press_event = Clock.schedule_once(
+                lambda dt: self._show_import_dialog(), 3.0
+            )
+            touch.grab(self)
+            return True
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            
+            # Cancel long press event
+            if self._long_press_event:
+                self._long_press_event.cancel()
+                self._long_press_event = None
+            
+            # If it was a short press (less than 3 seconds), create new workspace
+            if self._touch_start_time and (time.time() - self._touch_start_time) < 3.0:
+                App.get_running_app().create_new_workspace()
+            
+            self._touch_start_time = None
+            return True
+        return super().on_touch_up(touch)
+
+    def on_touch_move(self, touch):
+        # Cancel long press if finger moves too much
+        if touch.grab_current is self:
+            if self._long_press_event:
+                self._long_press_event.cancel()
+                self._long_press_event = None
+        return super().on_touch_move(touch)
+
+    def _show_import_dialog(self):
+        """Show the import dialog for long press."""
+        App.get_running_app().show_import_dialog()
+        self._long_press_event = None
+
 class KanbanApp(App):
     """
     The main application class for the Kanban app.
@@ -1322,11 +1579,15 @@ class KanbanApp(App):
         try:
             if self.workspace_manager.is_workspace_encrypted(workspace_name):
                 TextInputPopup(title=f"Password for {workspace_name}", hint_text="Enter password", is_password=True, callback=lambda p: self.open_workspace_callback(workspace_name, p)).open()
-            elif self.workspace_manager.open_workspace(workspace_name):
-                self.sm.transition.direction = 'left'
-                self.sm.current = 'board'
+            else:
+                workspace = self.workspace_manager.open_workspace(workspace_name)
+                if workspace:
+                    self.sm.transition.direction = 'left'
+                    self.sm.current = 'board'
+                else:
+                    self.show_toast("Failed to open workspace.")
         except Exception as e:
-            self.show_toast(f"Error opening: {e}")
+            self.show_toast(f"Error opening workspace: {e}")
             print(traceback.format_exc())
 
     def open_workspace_callback(self, workspace_name, password):
@@ -1335,7 +1596,8 @@ class KanbanApp(App):
             workspace = self.workspace_manager.open_workspace(workspace_name, password=password)
             if workspace and workspace != "password_required":
                 self.sm.transition.direction, self.sm.current = 'left', 'board'
-            else: self.show_toast("Incorrect password.")
+            else: 
+                self.show_toast("Incorrect password.")
         except Exception as e:
             self.show_toast(f"Error with password: {e}")
             print(traceback.format_exc())
@@ -1343,15 +1605,25 @@ class KanbanApp(App):
     def create_new_workspace(self):
         """Opens a popup to get a name for a new workspace."""
         TextInputPopup(title="Create Workspace", hint_text="Enter name", callback=self.create_workspace_callback).open()
+        
+    def show_manual_import_option(self):
+        """Show manual import dialog when long press is not available."""
+        if ANDROID_AVAILABLE:
+            self.show_import_dialog()
+        else:
+            self.show_toast("Import: Hold the + button for 3 seconds on mobile")
 
     def create_workspace_callback(self, name):
         """Callback to create the new workspace."""
         try:
-            if not name: self.show_toast("Name cannot be empty."); return
+            if not name: 
+                self.show_toast("Name cannot be empty.")
+                return
             if self.workspace_manager.create_workspace(name):
                 self.show_toast(f"Workspace '{name}' created.")
                 self.sm.get_screen('workspaces').populate_grid()
-            else: self.show_toast(f"'{name}' already exists.")
+            else: 
+                self.show_toast(f"'{name}' already exists.")
         except Exception as e:
             self.show_toast(f"Failed to create: {e}")
             print(traceback.format_exc())
@@ -1362,7 +1634,8 @@ class KanbanApp(App):
             if self.workspace_manager.delete_workspace(workspace_name):
                 self.show_toast(f"'{workspace_name}' deleted.")
                 self.sm.get_screen('workspaces').populate_grid()
-            else: self.show_toast("Error deleting workspace.")
+            else: 
+                self.show_toast("Error deleting workspace.")
         except Exception as e:
             self.show_toast(f"Failed to delete: {e}")
             print(traceback.format_exc())
@@ -1385,7 +1658,8 @@ class KanbanApp(App):
             if workspace and workspace != "password_required":
                 self.workspace_manager.close_current_workspace() # Close it again before renaming
                 TextInputPopup(title="Rename Workspace", hint_text="Enter new name", callback=lambda n: self.rename_workspace_callback(old_name, n, password)).open()
-            else: self.show_toast("Incorrect password.")
+            else: 
+                self.show_toast("Incorrect password.")
         except Exception as e:
             self.show_toast(f"Password check failed: {e}")
             print(traceback.format_exc())
@@ -1394,14 +1668,18 @@ class KanbanApp(App):
 
     def rename_workspace_callback(self, old_name, new_name, password=None):
         """The final callback that performs the workspace renaming."""
-        if self._RENAME_IN_PROGRESS: return
+        if self._RENAME_IN_PROGRESS: 
+            return
         self._RENAME_IN_PROGRESS = True
         try:
-            if not new_name: self.show_toast("New name cannot be empty."); return
+            if not new_name: 
+                self.show_toast("New name cannot be empty.")
+                return
             if self.workspace_manager.rename_workspace(old_name, new_name, password=password):
                 self.show_toast(f"Renamed to '{new_name}'.")
                 self.sm.get_screen('workspaces').populate_grid()
-            else: self.show_toast(f"Failed to rename.")
+            else: 
+                self.show_toast(f"Failed to rename.")
         except Exception as e:
             self.show_toast(f"Failed to rename: {e}")
             print(traceback.format_exc())
@@ -1429,7 +1707,8 @@ class KanbanApp(App):
                 self.workspace_manager.close_current_workspace()
                 # Prompt for the new password (blank to remove)
                 TextInputPopup(title="Enter New Password", hint_text="Leave blank to remove", is_password=True, callback=lambda n: self.set_password_callback(workspace_name, n, current_password=current_password)).open()
-            else: self.show_toast("Incorrect password.")
+            else: 
+                self.show_toast("Incorrect password.")
         except Exception as e:
             self.show_toast(f"Password confirmation failed: {e}")
             print(traceback.format_exc())
@@ -1449,6 +1728,14 @@ class KanbanApp(App):
                 self.show_toast("Could not update password.")
         except Exception as e:
             self.show_toast(f"Failed to set password: {e}")
+            print(traceback.format_exc())
+
+    def show_import_dialog(self):
+        """Show the workspace import dialog."""
+        try:
+            WorkspaceImportDialog().open()
+        except Exception as e:
+            self.show_toast(f"Error opening import dialog: {e}")
             print(traceback.format_exc())
 
 

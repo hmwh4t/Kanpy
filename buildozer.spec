@@ -29,8 +29,7 @@ version = 1.0.5
 
 # (list) Application requirements
 # All the python packages your app needs.
-requirements = python3,kivy,cryptography,cffi,pycparser,idna
-
+requirements = python3,kivy,cryptography,cffi,pycparser,androidstorage4kivy
 # (str) Presplash of the application
 # You can create a loading image at data/presplash.png
 # presplash.filename = %(source.dir)s/data/presplash.png
