@@ -10,8 +10,6 @@ import tempfile
 import shutil
 import time
 import os
-import os
-import time
 
 # Kivy framework imports
 from kivy.app import App
@@ -38,7 +36,6 @@ from kivy.core.window import Window
 # Android specific imports (for mobile builds)
 try:
     from android.permissions import request_permissions, Permission, check_permission
-    request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
     from androidstorage4kivy import SharedStorage, Chooser
     ANDROID_AVAILABLE = True
 except ImportError:
@@ -476,6 +473,14 @@ class WorkspaceOptionsDialog(ModalView):
         try:
             app = App.get_running_app()
             
+            # Check if we have storage permissions
+            if not check_permission(Permission.READ_EXTERNAL_STORAGE) or not check_permission(Permission.WRITE_EXTERNAL_STORAGE):
+                # Request permissions and show message
+                request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
+                Clock.schedule_once(lambda dt: app.show_toast("Please grant storage permissions and try again"), 1)
+                self.dismiss()
+                return
+            
             # Check if workspace is encrypted and get password if needed
             if self.is_encrypted:
                 TextInputPopup(
@@ -488,7 +493,9 @@ class WorkspaceOptionsDialog(ModalView):
                 self._perform_export()
                 
         except Exception as e:
-            App.get_running_app().show_toast(f"Export error: {e}")
+            # Use Clock.schedule_once to show toast on main thread
+            error_msg = str(e)  # Capture error message immediately
+            Clock.schedule_once(lambda dt: App.get_running_app().show_toast(f"Export error: {error_msg}"), 0)
         finally:
             self.dismiss()
 
@@ -503,10 +510,13 @@ class WorkspaceOptionsDialog(ModalView):
                 app.workspace_manager.close_current_workspace()
                 self._perform_export()
             else:
-                app.show_toast("Incorrect password.")
+                # Use Clock.schedule_once to show toast on main thread
+                Clock.schedule_once(lambda dt: app.show_toast("Incorrect password."), 0)
                 
         except Exception as e:
-            App.get_running_app().show_toast(f"Password verification failed: {e}")
+            # Use Clock.schedule_once to show toast on main thread
+            error_msg = str(e)  # Capture error message immediately
+            Clock.schedule_once(lambda dt: App.get_running_app().show_toast(f"Password verification failed: {error_msg}"), 0)
 
     def _perform_export(self):
         """Actually perform the export operation."""
@@ -516,7 +526,8 @@ class WorkspaceOptionsDialog(ModalView):
             # Get workspace directory path
             workspace_info = app.workspace_manager.workspaces().get(self.workspace_name)
             if not workspace_info:
-                app.show_toast("Workspace not found")
+                # Use Clock.schedule_once to show toast on main thread
+                Clock.schedule_once(lambda dt: app.show_toast("Workspace not found"), 0)
                 return
                 
             workspace_dir = os.path.dirname(workspace_info['path'])
@@ -538,16 +549,20 @@ class WorkspaceOptionsDialog(ModalView):
             # Copy to shared storage (Android Documents folder)
             if ANDROID_AVAILABLE:
                 SharedStorage().copy_to_shared(private_file=zip_path)
-                app.show_toast(f"'{self.workspace_name}' exported to Documents folder")
+                # Use Clock.schedule_once to show toast on main thread
+                Clock.schedule_once(lambda dt: app.show_toast(f"'{self.workspace_name}' exported to Documents folder"), 0)
                 
                 # Clean up temporary file
                 if os.path.exists(zip_path):
                     os.remove(zip_path)
             else:
-                app.show_toast(f"Export saved to: {zip_path}")
+                # Use Clock.schedule_once to show toast on main thread
+                Clock.schedule_once(lambda dt: app.show_toast(f"Export saved to: {zip_path}"), 0)
                 
         except Exception as e:
-            App.get_running_app().show_toast(f"Export failed: {e}")
+            # Use Clock.schedule_once to show toast on main thread
+            error_msg = str(e)  # Capture error message immediately
+            Clock.schedule_once(lambda dt: App.get_running_app().show_toast(f"Export failed: {error_msg}"), 0)
             print(f"Export error: {e}")
             traceback.print_exc()
         
@@ -1371,11 +1386,20 @@ class WorkspaceImportDialog(ModalView):
             return
             
         try:
+            # Check if we have storage permissions
+            if not check_permission(Permission.READ_EXTERNAL_STORAGE) or not check_permission(Permission.WRITE_EXTERNAL_STORAGE):
+                # Request permissions and try again after a delay
+                request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
+                Clock.schedule_once(lambda dt: App.get_running_app().show_toast("Please grant storage permissions and try again"), 1)
+                self.dismiss()
+                return
+                
             # Use Chooser to select a zip file
             Chooser(self.chooser_callback).choose_content("application/zip")
             self.dismiss()
         except Exception as e:
-            App.get_running_app().show_toast(f"Error opening file chooser: {e}")
+            error_msg = str(e)  # Capture error message immediately
+            Clock.schedule_once(lambda dt: App.get_running_app().show_toast(f"Error opening file chooser: {error_msg}"), 0)
             self.dismiss()
 
     def chooser_callback(self, uri_list):
@@ -1385,40 +1409,97 @@ class WorkspaceImportDialog(ModalView):
                 return
                 
             for uri in uri_list:
+                print(f"Selected file URI: {uri}")
+                
                 # Copy the selected file to private storage
-                private_file = SharedStorage().copy_from_shared(uri)
-                self._process_imported_file(private_file)
+                try:
+                    private_file = SharedStorage().copy_from_shared(uri)
+                    print(f"Copied to private storage: {private_file}")
+                    self._process_imported_file(private_file)
+                except Exception as copy_error:
+                    print(f"Error copying file: {copy_error}")
+                    error_msg = str(copy_error)
+                    Clock.schedule_once(lambda dt: App.get_running_app().show_toast(f"Error copying file: {error_msg}"), 0)
                 break  # Only process the first file
                 
         except Exception as e:
-            App.get_running_app().show_toast(f"Error importing file: {e}")
+            # Use Clock.schedule_once to show toast on main thread
+            error_msg = str(e)  # Capture error message immediately
+            Clock.schedule_once(lambda dt: App.get_running_app().show_toast(f"Error importing file: {error_msg}"), 0)
 
     def _process_imported_file(self, file_path):
         """Process the imported zip file and extract workspace."""
         try:
             app = App.get_running_app()
             
-            # Create a temporary directory for extraction
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Extract the zip file
-                with zipfile.ZipFile(file_path, 'r') as zip_file:
-                    zip_file.extractall(temp_dir)
+            # Check if file exists and is readable
+            if not os.path.exists(file_path):
+                Clock.schedule_once(lambda dt: app.show_toast("Imported file not found"), 0)
+                return
+                
+            if not os.access(file_path, os.R_OK):
+                Clock.schedule_once(lambda dt: app.show_toast("Cannot read imported file - permission denied"), 0)
+                return
+            
+            print(f"Processing import file: {file_path}")
+            print(f"File size: {os.path.getsize(file_path)} bytes")
+            
+            # Create a temporary directory for extraction in app's cache
+            if ANDROID_AVAILABLE:
+                cache_dir = SharedStorage().get_cache_dir()
+                temp_dir = os.path.join(cache_dir, f"import_{int(time.time())}")
+                os.makedirs(temp_dir, exist_ok=True)
+                cleanup_temp = True
+            else:
+                temp_dir_obj = tempfile.TemporaryDirectory()
+                temp_dir = temp_dir_obj.name
+                cleanup_temp = False
+            
+            try:
+                print(f"Extracting to temporary directory: {temp_dir}")
+                
+                try:
+                    # Extract the zip file
+                    with zipfile.ZipFile(file_path, 'r') as zip_file:
+                        zip_file.extractall(temp_dir)
+                    print(f"Successfully extracted zip file")
+                except Exception as extract_error:
+                    error_msg = f"Failed to extract zip: {extract_error}"
+                    print(error_msg)
+                    Clock.schedule_once(lambda dt: app.show_toast(error_msg), 0)
+                    return
+                
+                # List contents of temp directory for debugging
+                try:
+                    temp_contents = os.listdir(temp_dir)
+                    print(f"Temp directory contents: {temp_contents}")
+                except Exception as list_error:
+                    print(f"Cannot list temp directory: {list_error}")
                 
                 # Look for workspace data file
                 data_file = None
                 workspace_name = None
                 
-                for root, dirs, files in os.walk(temp_dir):
-                    for file in files:
-                        if file == 'data.json':
-                            data_file = os.path.join(root, file)
-                            workspace_name = os.path.basename(root)
+                try:
+                    for root, dirs, files in os.walk(temp_dir):
+                        print(f"Walking directory: {root}, files: {files}")
+                        for file in files:
+                            if file == 'data.json':
+                                data_file = os.path.join(root, file)
+                                workspace_name = os.path.basename(root)
+                                print(f"Found data file: {data_file}, workspace: {workspace_name}")
+                                break
+                        if data_file:
                             break
-                    if data_file:
-                        break
+                except Exception as walk_error:
+                    error_msg = f"Error walking temp directory: {walk_error}"
+                    print(error_msg)
+                    Clock.schedule_once(lambda dt: app.show_toast(error_msg), 0)
+                    return
                 
                 if not data_file or not workspace_name:
-                    app.show_toast("Invalid workspace file format")
+                    # Use Clock.schedule_once to show toast on main thread
+                    Clock.schedule_once(lambda dt: app.show_toast("Invalid workspace file format"), 0)
                     return
                 
                 # Check if workspace already exists
@@ -1431,11 +1512,37 @@ class WorkspaceImportDialog(ModalView):
                     counter += 1
                 
                 # Copy the workspace to the workspaces directory
-                import os
                 from config import WORKSPACES_DIRECTORY
                 
                 workspace_dir = os.path.join(WORKSPACES_DIRECTORY, workspace_name)
-                shutil.copytree(os.path.dirname(data_file), workspace_dir)
+                
+                try:
+                    # Create the workspace directory
+                    os.makedirs(workspace_dir, exist_ok=True)
+                    print(f"Created workspace directory: {workspace_dir}")
+                    
+                    # Copy files manually with better error handling
+                    source_dir = os.path.dirname(data_file)
+                    print(f"Copying from source directory: {source_dir}")
+                    
+                    for item in os.listdir(source_dir):
+                        source_item = os.path.join(source_dir, item)
+                        dest_item = os.path.join(workspace_dir, item)
+                        
+                        print(f"Copying {source_item} to {dest_item}")
+                        
+                        if os.path.isfile(source_item):
+                            shutil.copy2(source_item, dest_item)
+                        elif os.path.isdir(source_item):
+                            shutil.copytree(source_item, dest_item)
+                    
+                    print(f"Successfully copied workspace to: {workspace_dir}")
+                    
+                except Exception as copy_error:
+                    error_msg = f"Failed to copy workspace files: {copy_error}"
+                    print(error_msg)
+                    Clock.schedule_once(lambda dt: app.show_toast(error_msg), 0)
+                    return
                 
                 # Update the workspace manager configuration
                 app.workspace_manager._load_master_config()
@@ -1446,11 +1553,26 @@ class WorkspaceImportDialog(ModalView):
                 }
                 app.workspace_manager._save_master_config()
                 
-                app.show_toast(f"Workspace imported as '{workspace_name}'")
-                app.sm.get_screen('workspaces').populate_grid()
+                # Use Clock.schedule_once to show toast and update UI on main thread
+                Clock.schedule_once(lambda dt: app.show_toast(f"Workspace imported as '{workspace_name}'"), 0)
+                Clock.schedule_once(lambda dt: app.sm.get_screen('workspaces').populate_grid(), 0)
+                
+            finally:
+                # Clean up the temporary directory if we created it manually
+                if cleanup_temp and os.path.exists(temp_dir):
+                    try:
+                        shutil.rmtree(temp_dir)
+                        print(f"Cleaned up temp directory: {temp_dir}")
+                    except Exception as cleanup_error:
+                        print(f"Failed to cleanup temp directory: {cleanup_error}")
+                elif not cleanup_temp:
+                    # Close the TemporaryDirectory context manager
+                    temp_dir_obj.cleanup()
                 
         except Exception as e:
-            App.get_running_app().show_toast(f"Error processing import: {e}")
+            # Use Clock.schedule_once to show toast on main thread
+            error_msg = str(e)  # Capture error message immediately
+            Clock.schedule_once(lambda dt: App.get_running_app().show_toast(f"Error processing import: {error_msg}"), 0)
         finally:
             # Clean up the temporary file
             try:
@@ -1518,6 +1640,14 @@ class KanbanApp(App):
     - UI setup
     - Workspace and drag-drop management
     """
+
+    def on_start(self):
+        """Request Android permissions when the app starts."""
+        if ANDROID_AVAILABLE:
+            try:
+                request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
+            except Exception as e:
+                print(f"Error requesting permissions: {e}")
 
     def build(self):
         """Initialize the application, load resources, and set up the UI."""
