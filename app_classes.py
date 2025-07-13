@@ -9,23 +9,25 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 
+# Import constants
+from config import (
+    SALT_LENGTH, KEY_LENGTH, PBKDF2_ITERATIONS, 
+    WORKSPACES_CONFIG_FILE, WORKSPACES_DIRECTORY, WORKSPACE_DATA_FILE,
+    DATETIME_FORMAT, MIN_PRIORITY, MAX_PRIORITY
+)
+
 
 class EncryptionHelper:
     """Helper class for encrypting and decrypting data using password-based encryption."""
-    
-    # Constants for key derivation function (KDF)
-    SALT_LENGTH = 16  # Size of the salt in bytes
-    KEY_LENGTH = 32   # Desired key length in bytes
-    ITERATIONS = 100000  # Number of iterations for PBKDF2, for security
     
     @staticmethod
     def derive_key(password: str, salt: bytes) -> bytes:
         """Derive an encryption key from a password and salt using PBKDF2."""
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
-            length=EncryptionHelper.KEY_LENGTH,
+            length=KEY_LENGTH,
             salt=salt,
-            iterations=EncryptionHelper.ITERATIONS,
+            iterations=PBKDF2_ITERATIONS,
             backend=default_backend()
         )
         # Derive the key and encode it for use with Fernet
@@ -34,7 +36,7 @@ class EncryptionHelper:
     @staticmethod
     def encrypt(data_str: str, password: str) -> bytes:
         """Encrypt a string using a password."""
-        salt = os.urandom(EncryptionHelper.SALT_LENGTH)
+        salt = os.urandom(SALT_LENGTH)
         key = EncryptionHelper.derive_key(password, salt)
         encrypted_data = Fernet(key).encrypt(data_str.encode('utf-8'))
         # Prepend the salt to the encrypted data for later use in decryption
@@ -44,8 +46,8 @@ class EncryptionHelper:
     def decrypt(encrypted_data: bytes, password: str) -> str:
         """Decrypt encrypted data using a password."""
         # Extract the salt from the beginning of the data
-        salt = encrypted_data[:EncryptionHelper.SALT_LENGTH]
-        ciphertext = encrypted_data[EncryptionHelper.SALT_LENGTH:]
+        salt = encrypted_data[:SALT_LENGTH]
+        ciphertext = encrypted_data[SALT_LENGTH:]
         # Re-derive the key using the same password and salt
         key = EncryptionHelper.derive_key(password, salt)
         # Decrypt and decode the data
@@ -449,7 +451,7 @@ class Workspace:
 class WorkspaceManager:
     """Manages all workspaces, handling creation, loading, saving, and deletion from the filesystem."""
     
-    def __init__(self, config_path: str = "workspaces.json", workspaces_dir: str = "workspaces"):
+    def __init__(self, config_path: str = WORKSPACES_CONFIG_FILE, workspaces_dir: str = WORKSPACES_DIRECTORY):
         self.workspaces_dir = workspaces_dir  # Directory to store all workspace folders
         self.config_path = config_path  # Master JSON file tracking all workspaces
         self._workspaces_registry: Dict[str, Dict[str, Any]] = {}
@@ -505,7 +507,7 @@ class WorkspaceManager:
             return False
         
         # A valid workspace must have a data.json file inside its directory
-        return os.path.exists(os.path.join(path, "data.json"))
+        return os.path.exists(os.path.join(path, WORKSPACE_DATA_FILE))
     
     def _is_file_encrypted(self, file_path: str) -> bool:
         """Check if a file is encrypted by attempting to parse it as JSON.
@@ -561,7 +563,7 @@ class WorkspaceManager:
             return None
         
         path = self._workspaces_registry[name]["path"]
-        data_path = os.path.join(path, "data.json")
+        data_path = os.path.join(path, WORKSPACE_DATA_FILE)
         
         try:
             is_encrypted = self._is_file_encrypted(data_path)
@@ -595,7 +597,7 @@ class WorkspaceManager:
         workspace = self._current_workspace
         workspace.update_last_edited()
         
-        data_path = os.path.join(workspace.path, "data.json")
+        data_path = os.path.join(workspace.path, WORKSPACE_DATA_FILE)
         json_data = json.dumps(workspace.to_dict(), indent=2)
         
         try:
@@ -631,7 +633,7 @@ class WorkspaceManager:
         if name not in self._workspaces_registry:
             return False
         
-        data_path = os.path.join(self._workspaces_registry[name]["path"], "data.json")
+        data_path = os.path.join(self._workspaces_registry[name]["path"], WORKSPACE_DATA_FILE)
         return self._is_file_encrypted(data_path)
     
     def delete_workspace(self, name: str) -> bool:

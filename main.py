@@ -1,7 +1,10 @@
+# =====================================================
+# IMPORTS
+# =====================================================
+
 # Standard library imports
 import datetime
 import traceback
-import time
 
 # Kivy framework imports
 from kivy.app import App
@@ -9,227 +12,454 @@ from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.relativelayout import RelativeLayout
-from kivy.properties import ObjectProperty, StringProperty, BooleanProperty
-from kivy.clock import Clock
-from kivy.uix.modalview import ModalView
-from kivy.metrics import dp
-from kivy.utils import get_color_from_hex
-from kivy.graphics import Color, Rectangle
-from kivy.lang import Builder
-from kivy.core.text import LabelBase
-from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.widget import Widget
 from kivy.uix.label import Label
 from kivy.uix.button import Button
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.modalview import ModalView
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.properties import ObjectProperty, StringProperty, BooleanProperty
+from kivy.clock import Clock
+from kivy.metrics import dp
+from kivy.utils import get_color_from_hex
+from kivy.graphics import Color, Rectangle, Line
+from kivy.lang import Builder
+from kivy.core.text import LabelBase
+from kivy.animation import Animation
+from kivy.core.window import Window
 
-# Local application-specific imports
+# Local application imports
 from app_classes import WorkspaceManager, Card, Board
+from ui_components import Toast, TextInputPopup, ConfirmationPopup, CalendarWidget, DatePickerPopup
+from config import APP_COLORS, LONG_PRESS_DURATION, KV_FILE_PATH, DEFAULT_FONT_NAME, FALLBACK_FONT_NAME, FONT_FILE_PATH
 
-# Removed all Android-specific imports (jnius, plyer, platform)
+# =====================================================
+# UTILITY FUNCTIONS
+# =====================================================
 
-# Application color palette for consistent UI styling
-APP_COLORS = {
-    "background": get_color_from_hex("#FAFAFA"),
-    "background_dark": get_color_from_hex("#D1D5DB"),
-    "primary": get_color_from_hex("#2563EB"),
-    "primary_dark": get_color_from_hex("#1D4ED8"),
-    "accent": get_color_from_hex("#10B981"),
-    "text": get_color_from_hex("#1F2937"),
-    "text_secondary": get_color_from_hex("#6B7280"),
-    "white": get_color_from_hex("#FFFFFF"),
-    "red": get_color_from_hex("#EF4444"),
-    "border": get_color_from_hex("#E5E7EB"),
-    "card": get_color_from_hex("#FFFFFF"),
-    "hover": get_color_from_hex("#F3F4F6")
-}
+def get_app():
+    """Get the running app instance."""
+    return App.get_running_app()
 
-# Removed the notification checking function
+def get_workspace_manager():
+    """Get the workspace manager from the app."""
+    return get_app().workspace_manager
 
-class Toast(ModalView):
-    """A small, temporary popup message (like Android's Toast)."""
-    text = StringProperty('')
-    def __init__(self, text, **kwargs):
-        super().__init__(**kwargs)
-        self.text = text
-        # Dismiss the toast automatically after a short duration
-        Clock.schedule_once(self.dismiss, 1.5)
+def get_drag_manager():
+    """Get the drag drop manager from the app."""
+    return get_app().drag_drop_manager
 
-class TextInputPopup(ModalView):
-    """A popup dialog to get text input from the user."""
-    title = StringProperty("Enter Value")
-    hint_text = StringProperty("")
-    callback = ObjectProperty(None)
-    is_password = BooleanProperty(False)
-    def on_submit(self, text_input):
-        """Handles the submission of the text input."""
-        if self.callback:
-            self.callback(text_input)
-        self.dismiss()
+def show_toast(message):
+    """Show a toast message."""
+    get_app().show_toast(message)
 
-class ConfirmationPopup(ModalView):
-    """A popup dialog to ask for user confirmation."""
-    title = StringProperty("Confirm")
-    text = StringProperty("")
-    callback = ObjectProperty(None)
-    def on_confirm(self):
-        """Executes the callback function upon confirmation."""
-        if self.callback:
-            self.callback()
-        self.dismiss()
+def save_current_workspace():
+    """Save the current workspace."""
+    get_workspace_manager().save_current_workspace()
 
-class CalendarWidget(GridLayout):
-    """A widget that displays a calendar for a given month."""
-    popup = ObjectProperty(None)
-    current_date = ObjectProperty(datetime.date.today())
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.cols = 7
-        self.bind(current_date=self.update_calendar)
-        Clock.schedule_once(lambda dt: self.update_calendar())
+# =====================================================
+# DRAG AND DROP SYSTEM
+# =====================================================
 
-    def update_calendar(self, *args):
-        """Redraws the calendar grid for the current month and year."""
-        if self.popup:
-            self.popup.ids.month_year_label.text = self.current_date.strftime('%B %Y')
-        self.clear_widgets()
-        year = self.current_date.year
-        month = self.current_date.month
-        today = datetime.date.today()
-        # Add day headers (S, M, T, W, T, F, S)
-        for day in ['S', 'M', 'T', 'W', 'T', 'F', 'S']:
-            self.add_widget(Label(text=day, size_hint_y=None, height=dp(30), color=APP_COLORS['text_secondary']))
-        # Calculate the starting day of the week and number of days in the month
-        first_day_of_month = datetime.date(year, month, 1).weekday()
-        start_day_index = (first_day_of_month + 1) % 7
-        num_days_in_month = (datetime.date(year, month + 1, 1) - datetime.timedelta(days=1)).day if month < 12 else 31
-        # Add empty labels for days before the 1st of the month
-        for _ in range(start_day_index):
-            self.add_widget(Label(text=""))
-        # Add a button for each day of the month
-        for day_num in range(1, num_days_in_month + 1):
-            day_date = datetime.date(year, month, day_num)
-            day_button = Button(text=str(day_num), on_press=self.select_day, background_color=(0, 0, 0, 0))
-            # Style the day buttons based on whether they are in the past, today, or future
-            if day_date < today:
-                day_button.disabled = True
-                day_button.disabled_color = APP_COLORS['text_secondary']
-            elif day_date == today:
-                day_button.disabled = True
-                day_button.disabled_color = APP_COLORS['primary']
-                day_button.bold = True
-            else:
-                day_button.disabled = False
-                day_button.color = APP_COLORS['text']
-            self.add_widget(day_button)
-
-    def select_day(self, instance):
-        """Callback for when a day button is pressed."""
-        day = int(instance.text)
-        if self.popup:
-            self.popup.select_date(datetime.date(self.current_date.year, self.current_date.month, day))
-
-    def go_prev_month(self):
-        """Navigates the calendar to the previous month."""
-        year, month = self.current_date.year, self.current_date.month
-        if month == 1: year, month = year - 1, 12
-        else: month -= 1
-        self.current_date = datetime.date(year, month, 1)
-
-    def go_next_month(self):
-        """Navigates the calendar to the next month."""
-        year, month = self.current_date.year, self.current_date.month
-        if month == 12: year, month = year + 1, 1
-        else: month += 1
-        self.current_date = datetime.date(year, month, 1)
-
-class DatePickerPopup(ModalView):
-    """A popup that contains a CalendarWidget for date selection."""
-    callback = ObjectProperty(None)
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.selected_date = None
-        self.ids.calendar_widget.popup = self
-    def select_date(self, date):
-        """Sets the selected date, calls the callback, and dismisses the popup."""
-        self.selected_date = date
-        if self.callback: self.callback(self.selected_date)
-        self.dismiss()
-
-class MoveCardPopup(ModalView):
-    """A popup to select a new list to move a card to."""
-    card_widget = ObjectProperty(None)
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        Clock.schedule_once(self.populate_lists)
-
-    def populate_lists(self, *args):
-        """Fills the popup with buttons for each possible destination list."""
-        board = self.card_widget.list_widget.board_widget.board
-        source_list_name = self.card_widget.list_widget.list_name
-        for list_obj in board.list_objects():
-            if list_obj.name != source_list_name:
-                btn = Button(text=list_obj.name, size_hint_y=None, height=dp(48))
-                btn.bind(on_press=self.move_card_to_list)
-                self.ids.list_container.add_widget(btn)
-
-    def move_card_to_list(self, instance):
-        """Handles the logic of moving the card to the selected list."""
-        dest_list_name = instance.text
-        board_widget = self.card_widget.list_widget.board_widget
-        source_list_widget = self.card_widget.list_widget
+class DragDropManager:
+    """
+    Manages drag and drop operations for cards in the Kanban app.
+    
+    Handles:
+    - Starting and ending drag operations
+    - Creating visual drag ghosts
+    - Auto-scrolling during drag
+    - Drop location detection
+    - Visual drop indicators
+    """
+    
+    def __init__(self):
+        # Drag state tracking
+        self.is_dragging = False
+        self.dragged_card = None
+        self.dragged_card_widget = None
+        self.drag_ghost = None
         
-        if board_widget.board.move_card(self.card_widget.card_obj, source_list_widget.list_name, dest_list_name):
-            App.get_running_app().workspace_manager.save_current_workspace()
-            board_widget.populate_lists() # Refresh the board view
-            App.get_running_app().show_toast(f"Card moved to '{dest_list_name}'")
+        # Original position tracking for cancellation
+        self.original_parent = None
+        self.original_list_widget = None
+        
+        # Visual feedback
+        self.drop_indicator = None
+        self.indicator_parent = None
+        
+        # Auto-scroll functionality
+        self.scroll_trigger = None
+
+        # Bind to mouse movement for ghost positioning
+        Window.bind(mouse_pos=self.on_mouse_move)
+
+    def on_mouse_move(self, window, pos):
+        """Update ghost position when mouse moves."""
+        if self.is_dragging and self.drag_ghost:
+            offset_x = self.drag_ghost.width / 2
+            offset_y = self.drag_ghost.height / 2
+            self.drag_ghost.pos = (pos[0] - offset_x, pos[1] - offset_y)
+            self._update_drop_indicators(pos)
+
+    def start_drag(self, card_widget):
+        """Initiates a drag operation and starts the auto-scroll check."""
+        if self.is_dragging:
+            return False
+            
+        self.is_dragging = True
+        self.dragged_card = card_widget.card_obj
+        self.dragged_card_widget = card_widget
+        self.original_parent = card_widget.parent
+        self.original_list_widget = card_widget.list_widget
+
+        card_widget.opacity = 0.3
+        self._create_drag_ghost(card_widget)
+        self._disable_scrolling()
+        
+        # Start the auto-scroll check, running 60 times per second
+        self.scroll_trigger = Clock.schedule_interval(self._check_auto_scroll, 1/60.0)
+        return True
+
+    def _create_drag_ghost(self, card_widget):
+        """Creates a visual copy of the card that follows the cursor."""
+        app = get_app()
+        current_screen = app.sm.current_screen
+
+        ghost = Label(
+            text=card_widget.card_obj.name,
+            size_hint=(None, None),
+            size=card_widget.size,
+            color=APP_COLORS['white'],
+            bold=True
+        )
+        with ghost.canvas.before:
+            Color(rgba=get_color_from_hex("#3B82F6"))
+            ghost.bg_rect = Rectangle(pos=ghost.pos, size=ghost.size, radius=[dp(4)])
+        
+        def update_graphics(instance, value):
+            instance.bg_rect.pos = instance.pos
+            instance.bg_rect.size = instance.size
+        
+        ghost.bind(pos=update_graphics, size=update_graphics)
+        current_screen.add_widget(ghost)
+        self.drag_ghost = ghost
+        return True
+
+    def _update_drop_indicators(self, touch_pos):
+        """Updates the visual drop indicators based on cursor position."""
+        drop_location = self._find_drop_location(touch_pos)
+        if drop_location:
+            self._show_drop_indicator(drop_location)
         else:
-            App.get_running_app().show_toast("Error: Could not move card.")
-        self.dismiss()
+            self._clear_drop_indicator()
+
+    def _find_drop_location(self, touch_pos):
+        """FIXED: Finds the correct list, including the last one, to drop the card."""
+        app = App.get_running_app()
+        board_screen = app.sm.get_screen('board')
+        
+        if not board_screen.ids.board_container.children: return None
+        board_widget = board_screen.ids.board_container.children[0]
+        if not isinstance(board_widget, BoardWidget): return None
+            
+        lists_container = board_widget.ids.lists_container
+        
+        # Debug: Print touch position
+        print(f"Touch pos: {touch_pos}")
+        
+        # Check each list widget directly with window coordinates
+        for list_widget in lists_container.children:
+            if not isinstance(list_widget, ListWidget): continue
+            
+            # Convert window coordinates to this specific list widget's coordinates
+            local_pos_in_list = list_widget.to_widget(*touch_pos)
+            
+            # Use collide_point with the correctly transformed coordinates
+            if list_widget.collide_point(*local_pos_in_list):
+                print(f"Found collision with list: {list_widget.list_name}")
+                return self._find_card_drop_position(touch_pos, list_widget)
+        
+        print("No collision found with any list")
+        return None
+
+    def _find_card_drop_position(self, touch_pos, list_widget):
+        """Finds the exact index within a list's cards_layout to drop the card."""
+        cards_layout = list_widget.ids.cards_layout
+        local_pos = cards_layout.to_widget(*touch_pos)
+        
+        print(f"Cards layout local pos: {local_pos}")
+        
+        children = [child for child in cards_layout.children if isinstance(child, CardWidget)]
+        children.reverse()
+
+        if not children:
+            print(f"Empty list, inserting at index 0")
+            return { 'list_widget': list_widget, 'cards_layout': cards_layout, 'index': 0, 'local_y': cards_layout.height }
+        
+        for i, card_widget in enumerate(children):
+            if card_widget == self.dragged_card_widget: continue
+            
+            if local_pos[1] > (card_widget.y + card_widget.height / 2):
+                print(f"Inserting at index {i}")
+                return { 'list_widget': list_widget, 'cards_layout': cards_layout, 'index': i, 'local_y': card_widget.top }
+        
+        last_card = children[-1]
+        print(f"Inserting at end, index {len(children)}")
+        return { 'list_widget': list_widget, 'cards_layout': cards_layout, 'index': len(children), 'local_y': last_card.y }
+
+    def _show_drop_indicator(self, drop_location):
+        """Shows a line indicator by adding it directly to the target list."""
+        target_layout = drop_location['cards_layout']
+        
+        if not self.drop_indicator:
+            self.drop_indicator = Widget(size_hint=(None, None), size=(0, dp(2)))
+            with self.drop_indicator.canvas:
+                Color(rgba=get_color_from_hex("#3B82F6"))
+                self.drop_indicator.rect = Rectangle(pos=self.drop_indicator.pos, size=self.drop_indicator.size)
+        
+        if self.drop_indicator.parent != target_layout:
+            if self.drop_indicator.parent:
+                self.drop_indicator.parent.remove_widget(self.drop_indicator)
+            target_layout.add_widget(self.drop_indicator)
+
+        self.drop_indicator.width = target_layout.width - dp(10)
+        self.drop_indicator.pos = (dp(5), drop_location['local_y'] - dp(1))
+        
+        self.drop_indicator.rect.pos = self.drop_indicator.pos
+        self.drop_indicator.rect.size = self.drop_indicator.size
+        self.drop_indicator.opacity = 1
+
+    def _clear_drop_indicator(self):
+        """Removes the drop indicator."""
+        if self.drop_indicator and self.drop_indicator.parent:
+            self.drop_indicator.parent.remove_widget(self.drop_indicator)
+            self.drop_indicator.parent = None
+
+    def end_drag(self, touch_pos):
+        """Ends the drag operation and stops the auto-scroll check."""
+        print(f"=== END DRAG at position: {touch_pos} ===")
+        drop_location = self._find_drop_location(touch_pos)
+        print(f"Drop location found: {drop_location is not None}")
+        if drop_location:
+            print(f"Calling _perform_drop with location: {drop_location}")
+            self._perform_drop(drop_location)
+        else:
+            print("No drop location found, not performing drop")
+        self._cleanup_drag()
+        return True
+        
+    def _perform_drop(self, drop_location):
+        """Moves the card data and refreshes the UI."""
+        app = App.get_running_app()
+        target_list_widget = drop_location['list_widget']
+        target_index = drop_location['index']
+        
+        # Debug output
+        print(f"Drop attempt: list='{target_list_widget.list_name}', index={target_index}")
+        print(f"Original list: {self.original_list_widget.list_name}")
+        print(f"Card name: {self.dragged_card.name}")
+        
+        if target_list_widget == self.original_list_widget and target_index == self.original_parent.children.index(self.dragged_card_widget):
+            print("Same position, skipping drop")
+            return
+
+        workspace = app.workspace_manager.current_workspace()
+        board = workspace.selected_board()
+        source_list_obj = next(l for l in board.list_objects() if l.name == self.original_list_widget.list_name)
+        target_list_obj = next(l for l in board.list_objects() if l.name == target_list_widget.list_name)
+
+        print(f"Source list cards before: {[c.name for c in source_list_obj._cards]}")
+        print(f"Target list cards before: {[c.name for c in target_list_obj._cards]}")
+
+        # Store original index BEFORE removing the card
+        original_data_index = -1
+        if self.dragged_card in source_list_obj._cards:
+            original_data_index = source_list_obj._cards.index(self.dragged_card)
+            source_list_obj._cards.remove(self.dragged_card)
+            print(f"Removed card from source list at index {original_data_index}")
+        
+        if source_list_obj == target_list_obj:
+            # If moving down in the same list, adjust target index
+            if original_data_index != -1 and original_data_index < target_index:
+                 target_index -= 1
+                 print(f"Adjusted target index to {target_index} for same-list move")
+
+        target_list_obj._cards.insert(target_index, self.dragged_card)
+        print(f"Inserted card at index {target_index}")
+        print(f"Target list cards after: {[c.name for c in target_list_obj._cards]}")
+        
+        # Save and refresh
+        app.workspace_manager.save_current_workspace()
+        print("Saved workspace")
+        
+        self.original_list_widget.populate_cards()
+        if target_list_widget != self.original_list_widget:
+            target_list_widget.populate_cards()
+        print("Refreshed UI")
+        
+        app.show_toast(f"Card moved to '{target_list_widget.list_name}'")
+
+    def _cleanup_drag(self):
+        """Cleans up visuals, resets state, and stops the auto-scroll check."""
+        if self.scroll_trigger:
+            self.scroll_trigger.cancel()
+            self.scroll_trigger = None
+
+        if self.dragged_card_widget:
+            self.dragged_card_widget.opacity = 1.0
+        
+        if self.drag_ghost and self.drag_ghost.parent:
+            self.drag_ghost.parent.remove_widget(self.drag_ghost)
+        
+        self._clear_drop_indicator()
+        self._enable_scrolling()
+        
+        self.is_dragging = False
+        self.dragged_card = None
+        self.dragged_card_widget = None
+        self.drag_ghost = None
+        self.original_parent = None
+        self.original_list_widget = None
+
+    def _find_scroll_view(self, widget):
+        """Helper to find a ScrollView in a widget's children."""
+        for child in widget.children:
+            if isinstance(child, ScrollView):
+                return child
+        return None
+    
+    # --- NEW AND IMPROVED AUTO-SCROLL LOGIC ---
+    
+    def _check_auto_scroll(self, dt):
+        """NEW: Checks if the cursor is near an edge to trigger scrolling."""
+        if not self.is_dragging:
+            return
+
+        x, y = Window.mouse_pos
+        app = App.get_running_app()
+        board_screen = app.sm.get_screen('board')
+        if not board_screen.ids.board_container.children: return
+        board_widget = board_screen.ids.board_container.children[0]
+        if not isinstance(board_widget, BoardWidget): return
+
+        self._auto_scroll_horizontal(x, board_widget)
+        self._auto_scroll_vertical(x, y, board_widget)
+
+    def _auto_scroll_horizontal(self, x, board_widget):
+        """NEW: Scrolls the main board left or right."""
+        h_scroll_view = board_widget.ids.scroll_view
+        scroll_edge_threshold = dp(50)
+        scroll_speed = 15.0
+
+        if x < h_scroll_view.x + scroll_edge_threshold:
+            h_scroll_view.scroll_x = max(0, h_scroll_view.scroll_x - scroll_speed / h_scroll_view.width)
+        elif x > h_scroll_view.right - scroll_edge_threshold:
+            h_scroll_view.scroll_x = min(1, h_scroll_view.scroll_x + scroll_speed / h_scroll_view.width)
+
+    def _auto_scroll_vertical(self, x, y, board_widget):
+        """NEW: Scrolls a list up or down."""
+        lists_container = board_widget.ids.lists_container
+        local_pos_in_container = lists_container.to_widget(x, y)
+        scroll_edge_threshold = dp(50)
+        scroll_speed = 15.0
+
+        for list_widget in lists_container.children:
+            if list_widget.collide_point(*local_pos_in_container):
+                v_scroll_view = self._find_scroll_view(list_widget)
+                if v_scroll_view:
+                    if y > v_scroll_view.top - scroll_edge_threshold:
+                        v_scroll_view.scroll_y = min(1, v_scroll_view.scroll_y + scroll_speed / v_scroll_view.height)
+                    elif y < v_scroll_view.y + scroll_edge_threshold:
+                        v_scroll_view.scroll_y = max(0, v_scroll_view.scroll_y - scroll_speed / v_scroll_view.height)
+                break
+    
+    def _disable_scrolling(self):
+        """Disables scrolling to prevent conflicts during drag."""
+        app = App.get_running_app()
+        board_screen = app.sm.get_screen('board')
+        if board_screen.ids.board_container.children:
+            board_widget = board_screen.ids.board_container.children[0]
+            if isinstance(board_widget, BoardWidget):
+                board_widget.ids.scroll_view.do_scroll_x = False
+                lists_container = board_widget.ids.lists_container
+                for list_widget in lists_container.children:
+                    if isinstance(list_widget, ListWidget):
+                        list_scroll_view = self._find_scroll_view(list_widget)
+                        if list_scroll_view:
+                            list_scroll_view.do_scroll_y = False
+
+    def _enable_scrolling(self):
+        """Re-enables scrolling after drag operation is finished."""
+        app = App.get_running_app()
+        board_screen = app.sm.get_screen('board')
+        if board_screen.ids.board_container.children:
+            board_widget = board_screen.ids.board_container.children[0]
+            if isinstance(board_widget, BoardWidget):
+                board_widget.ids.scroll_view.do_scroll_x = True
+                lists_container = board_widget.ids.lists_container
+                for list_widget in lists_container.children:
+                    if isinstance(list_widget, ListWidget):
+                        list_scroll_view = self._find_scroll_view(list_widget)
+                        if list_scroll_view:
+                            list_scroll_view.do_scroll_y = True
+
+class DragDropIndicator(Widget):
+    """A blue line widget that indicates where a card will be dropped."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
 
 class CardContextMenu(ModalView):
     """A context menu popup for actions on a single card."""
     card_widget = ObjectProperty(None)
+
     def on_kv_post(self, base_widget):
         """Dynamically adjusts menu options based on card context."""
         super().on_kv_post(base_widget)
-        # If the card is in the "completed" list, disable editing and moving.
+        # If the card is in the "completed" list, disable editing.
         if self.card_widget.is_in_completed_list:
             if self.ids.get('edit_button'):
                 self.ids.content_box.remove_widget(self.ids.edit_button)
-            if self.ids.get('move_button'):
-                self.ids.content_box.remove_widget(self.ids.move_button)
+        
+        # Remove move button since we now have drag and drop
+        if self.ids.get('move_button'):
+            self.ids.content_box.remove_widget(self.ids.move_button)
 
     def edit_card(self):
         self.dismiss()
         self.card_widget.open_edit_popup()
-        
+
     def set_priority(self):
         self.dismiss()
         self.card_widget.set_priority_popup()
 
-    def move_card(self):
-        self.dismiss()
-        MoveCardPopup(card_widget=self.card_widget).open()
-        
     def delete_card(self):
         self.dismiss()
         self.card_widget.delete_card()
+
 
 class WorkspaceOptionsDialog(ModalView):
     """A dialog showing options for a selected workspace."""
     workspace_name = StringProperty("")
     is_encrypted = BooleanProperty(False)
+
     def __init__(self, workspace_name, **kwargs):
         super().__init__(**kwargs)
         self.workspace_name = workspace_name
         self.is_encrypted = App.get_running_app().workspace_manager.is_workspace_encrypted(self.workspace_name)
 
+
 class BoardOptionsDialog(ModalView):
     """A dialog showing options for the current board."""
     board_screen = ObjectProperty(None)
+
     def open_bin(self):
         """Navigates to the bin screen for the current board."""
         self.dismiss()
         self.board_screen.manager.current = 'bin_screen'
+
     def delete_board(self):
         """Deletes the current board."""
         self.dismiss()
@@ -248,9 +478,11 @@ class BoardOptionsDialog(ModalView):
             App.get_running_app().show_toast(f"Board '{current_board.name}' deleted")
             self.board_screen.load_current_board() # Refresh the board screen
 
+
 class ListContextMenu(ModalView):
     """A context menu popup for actions on a single list."""
     list_widget = ObjectProperty(None)
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -269,21 +501,24 @@ class ListContextMenu(ModalView):
     def rename(self):
         self.dismiss()
         self.list_widget.rename_popup()
+
     def move_to_bin(self):
         self.dismiss()
         self.list_widget.move_to_bin()
+
     def set_as_completed(self):
         self.dismiss()
         self.list_widget.set_as_completed()
 
+
 class CardPopup(ModalView):
     """A popup for creating a new card or editing an existing one."""
     title = StringProperty("Create New Card")
-    card_obj = ObjectProperty(None, allownone=True) # The card object to edit, if any
+    card_obj = ObjectProperty(None, allownone=True)  # The card object to edit, if any
     list_widget = ObjectProperty(None)
     callback = ObjectProperty(None)
     deadline_date = ObjectProperty(None, allownone=True)
-    
+
     def on_kv_post(self, base_widget):
         super().on_kv_post(base_widget)
         Clock.schedule_once(self.setup_fields)
@@ -291,23 +526,32 @@ class CardPopup(ModalView):
     def setup_fields(self, dt=None):
         """Populates the input fields if editing an existing card."""
         if self.card_obj:
-            self.ids.card_name_input.text = self.card_obj.name
-            self.ids.card_desc_input.text = self.card_obj.description
-            if self.card_obj.deadline:
-                try:
-                    self.deadline_date = datetime.datetime.strptime(self.card_obj.deadline, '%Y-%m-%d %H:%M').date()
-                except (ValueError, TypeError):
-                    self.deadline_date = None
+            self._populate_existing_card_data()
         self.update_deadline_button_text()
+
+    def _populate_existing_card_data(self):
+        """Helper method to populate fields with existing card data."""
+        self.ids.card_name_input.text = self.card_obj.name
+        self.ids.card_desc_input.text = self.card_obj.description
+
+        if self.card_obj.deadline:
+            self.deadline_date = self._parse_deadline_string(self.card_obj.deadline)
+
+    def _parse_deadline_string(self, deadline_str):
+        """Parse deadline string and return date object, or None if invalid."""
+        try:
+            return datetime.datetime.strptime(deadline_str, '%Y-%m-%d %H:%M').date()
+        except (ValueError, TypeError):
+            return None
 
     def update_deadline_button_text(self):
         """Updates the text on the deadline button to show the selected date."""
         if hasattr(self.ids, 'card_deadline_button'):
-            if self.deadline_date: 
+            if self.deadline_date:
                 self.ids.card_deadline_button.text = self.deadline_date.strftime('%Y-%m-%d')
-            else: 
+            else:
                 self.ids.card_deadline_button.text = "Set Deadline"
-    
+
     def open_date_picker(self):
         """Opens the date picker popup."""
         DatePickerPopup(callback=self.set_deadline).open()
@@ -319,41 +563,165 @@ class CardPopup(ModalView):
 
     def save_card(self):
         """Gathers data from inputs and calls the callback to save the card."""
+        card_data = self._gather_card_data()
+
+        if not card_data['name']:
+            App.get_running_app().show_toast("Card name cannot be empty.")
+            return
+
+        if self.callback:
+            self.callback(**card_data, card_to_edit=self.card_obj)
+        self.dismiss()
+
+    def _gather_card_data(self):
+        """Gather all card data from the form inputs."""
         name = self.ids.card_name_input.text
         description = self.ids.card_desc_input.text
         deadline_str = self.deadline_date.strftime('%Y-%m-%d 00:00') if self.deadline_date else None
-        
+
         # Get priority from slider if new, or keep existing if editing
-        if self.card_obj: 
+        if self.card_obj:
             priority = self.card_obj.priority
         else:
             priority = int(self.ids.priority_slider.value)
 
-        if not name:
-            App.get_running_app().show_toast("Card name cannot be empty.")
-            return
-        if self.callback:
-            self.callback(name=name, description=description, deadline=deadline_str, priority=priority, card_to_edit=self.card_obj)
-        self.dismiss()
+        return {
+            'name': name,
+            'description': description,
+            'deadline': deadline_str,
+            'priority': priority
+        }
+
 
 class CardWidget(BoxLayout):
-    """The visual representation of a single card in a list."""
+    """
+    The visual representation of a single card in a list.
+    
+    Features:
+    - Drag and drop functionality
+    - Long press for context menu
+    - Visual states for overdue and completed cards
+    - Touch handling for interactions
+    """
     card_obj = ObjectProperty(None)
     list_widget = ObjectProperty(None)
     is_overdue = BooleanProperty(False)
     is_in_completed_list = BooleanProperty(False)
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Touch state tracking for drag detection
+        self._touch_start_pos = None
+        self._is_potential_drag = False
+        self._long_press_event = None
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            drag_manager = get_drag_manager()
+            if drag_manager.is_dragging:
+                return False
+                
+            self._touch_start_pos = touch.pos
+            self._is_potential_drag = True
+            
+            self._long_press_event = Clock.schedule_once(
+                lambda dt: self._show_context_menu_if_not_dragging(), 0.5)
+            
+            touch.grab(self)
+            return True
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self and self._is_potential_drag:
+            if self._touch_start_pos:
+                dx = touch.pos[0] - self._touch_start_pos[0]
+                dy = touch.pos[1] - self._touch_start_pos[1]
+                distance = (dx**2 + dy**2)**0.5
+                
+                # If moved more than the threshold, start the drag
+                if distance > dp(10):
+                    self._cancel_long_press()
+                    self._start_drag() # No longer needs to pass touch
+                    return True
+            
+            # --- THIS BLOCK WAS REMOVED ---
+            # The window's on_mouse_move now handles all position updates.
+            # No need to manually update the position from here.
+            
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            
+            drag_manager = App.get_running_app().drag_drop_manager
+            
+            if drag_manager.is_dragging and drag_manager.dragged_card_widget == self:
+                # Use current mouse position instead of touch.pos which can be incorrect
+                current_mouse_pos = Window.mouse_pos
+                print(f"Using mouse position instead of touch.pos: {current_mouse_pos}")
+                drag_manager.end_drag(current_mouse_pos)
+                self._reset_touch_state()
+                return True
+            
+            if self._is_potential_drag and self._touch_start_pos:
+                distance = ((touch.pos[0] - self._touch_start_pos[0])**2 + 
+                          (touch.pos[1] - self._touch_start_pos[1])**2)**0.5
+                if distance <= dp(10):
+                    self._cancel_long_press()
+                    Clock.schedule_once(lambda dt: self.open_context_menu(), 0.1)
+            
+            self._reset_touch_state()
+            return True
+            
+        return super().on_touch_up(touch)
+
+    def _start_drag(self):
+        """FIXED: Initiates drag operation for this card without passing touch.
+        
+        Note: Cards can now be moved from/to any list including completed lists.
+        Previously there may have been a restriction preventing cards from being 
+        moved out of completed lists, but this has been removed to allow full
+        drag-and-drop functionality.
+        """
+        drag_manager = App.get_running_app().drag_drop_manager
+        if drag_manager.start_drag(self):
+            # The call to update_drag_position was removed from here.
+            # The on_mouse_move event will handle the ghost's position.
+            self._is_potential_drag = False
+
+    def _show_context_menu_if_not_dragging(self):
+        """Shows context menu if we're not in the middle of a drag."""
+        if self._is_potential_drag:
+            self.open_context_menu()
+            self._reset_touch_state()
+
+    def _cancel_long_press(self):
+        """Cancels the scheduled long press event."""
+        if self._long_press_event:
+            self._long_press_event.cancel()
+            self._long_press_event = None
+
+    def _reset_touch_state(self):
+        """Resets all touch-related state variables."""
+        self._touch_start_pos = None
+        self._is_potential_drag = False
+        self._cancel_long_press()
+
     def open_context_menu(self):
         CardContextMenu(card_widget=self).open()
+
     def open_edit_popup(self):
         popup = CardPopup(title="Edit Card", card_obj=self.card_obj, list_widget=self, callback=self.list_widget.edit_card_callback)
         popup.open()
+
     def delete_card(self):
         self.list_widget.delete_card_popup(self.card_obj)
-        
+
     def set_priority_popup(self):
         """Opens a popup to set the card's priority."""
-        popup = TextInputPopup(title="Set Priority (0-5)", 
-                               hint_text=str(self.card_obj.priority), 
+        popup = TextInputPopup(title="Set Priority (0-5)",
+                               hint_text=str(self.card_obj.priority),
                                callback=self.set_priority_callback)
         popup.open()
 
@@ -364,42 +732,52 @@ class CardWidget(BoxLayout):
             if 0 <= new_priority <= 5:
                 self.card_obj.priority = new_priority
                 App.get_running_app().workspace_manager.save_current_workspace()
-                self.list_widget.populate_cards() # Refresh list to show new priority
+                self.list_widget.populate_cards()
                 App.get_running_app().show_toast("Priority updated.")
             else:
                 App.get_running_app().show_toast("Priority must be between 0 and 5.")
         except (ValueError, TypeError):
             App.get_running_app().show_toast("Invalid input. Please enter a number.")
 
-
 class CreateBoardDialog(ModalView):
     """A simple confirmation dialog to create a new board."""
     board_screen = ObjectProperty(None)
+
     def create_new_board(self):
         self.dismiss()
         self.board_screen.create_new_board_and_load_it()
+
 
 class ClickableHeader(BoxLayout):
     """The main header of the board screen, which is clickable."""
     board_screen = ObjectProperty(None)
 
+
 class ListHeader(BoxLayout):
     """The header for a single list widget."""
     list_widget = ObjectProperty(None)
 
+
 class WorkspaceCard(ButtonBehavior, BoxLayout):
-    """A clickable card representing a single workspace on the main screen."""
+    """
+    A clickable card representing a single workspace on the main screen.
+    
+    Features:
+    - Short tap to open workspace
+    - Long press for options menu
+    - Displays workspace name and last edited time
+    """
     workspace_name = StringProperty('')
     app = ObjectProperty(None)
     last_edited_date = StringProperty('')
     last_edited_time = StringProperty('')
-    _long_press_event = None # To handle long press events
+    _long_press_event = None  # To handle long press events
 
     def on_touch_down(self, touch):
         """Schedules a long press event on touch down."""
         if self.collide_point(*touch.pos):
             self.cancel_long_press_event()
-            self._long_press_event = Clock.schedule_once(self.long_press_callback, 0.5)
+            self._long_press_event = Clock.schedule_once(self.long_press_callback, LONG_PRESS_DURATION)
             return super().on_touch_down(touch)
         return super().on_touch_down(touch)
 
@@ -428,11 +806,13 @@ class WorkspaceCard(ButtonBehavior, BoxLayout):
         self._long_press_event = None
         WorkspaceOptionsDialog(workspace_name=self.workspace_name).open()
 
+
 class ListWidget(BoxLayout):
     """The visual representation of a single list (column) on the board."""
     list_name = StringProperty('')
     board_widget = ObjectProperty(None)
     is_completed = BooleanProperty(False)
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         Clock.schedule_once(lambda dt: self.populate_cards())
@@ -447,8 +827,8 @@ class ListWidget(BoxLayout):
         is_completed_list = self.board_widget.board.get_completed_list_name() == self.list_name
         for card in list_obj.cards():
             card_widget = CardWidget(
-                card_obj=card, 
-                list_widget=self, 
+                card_obj=card,
+                list_widget=self,
                 is_overdue=card.is_overdue(),
                 is_in_completed_list=is_completed_list
             )
@@ -536,13 +916,16 @@ class ListWidget(BoxLayout):
         else:
             App.get_running_app().show_toast("Error: Could not move card to bin.")
 
+
 class BoardWidget(RelativeLayout):
     """The main widget that holds and displays all the lists for a board."""
     board = ObjectProperty(None)
+
     def __init__(self, board, **kwargs):
         super().__init__(**kwargs)
         self.board = board
         Clock.schedule_once(lambda dt: self.populate_lists())
+
     def populate_lists(self):
         """Clears and re-populates the widget with all lists from the board object."""
         lists_container = self.ids.lists_container
@@ -557,8 +940,10 @@ class BoardWidget(RelativeLayout):
             for list_obj in self.board.list_objects():
                 is_completed_list = self.board.get_completed_list_name() == list_obj.name
                 lists_container.add_widget(ListWidget(list_name=list_obj.name, board_widget=self, is_completed=is_completed_list))
+
     def add_new_list_popup(self):
         TextInputPopup(title="Add New List", hint_text="Enter list name", callback=self.add_new_list_callback).open()
+
     def add_new_list_callback(self, list_name):
         """Callback to create a new list on the board."""
         if list_name and self.board.create_list(list_name):
@@ -567,17 +952,21 @@ class BoardWidget(RelativeLayout):
         elif list_name:
             App.get_running_app().show_toast(f"List '{list_name}' already exists.")
 
+
 class BinItem(BoxLayout):
     """A widget representing a single deleted item (list or card) in the bin screen."""
     item_name = StringProperty('')
     item_type = StringProperty('')
     bin_screen = ObjectProperty(None)
 
+
 class WorkspaceScreen(Screen):
     """The main screen of the app, displaying all available workspaces."""
+
     def on_enter(self, *_):
         """Called when the screen is entered. Refreshes the workspace list."""
         Clock.schedule_once(self.populate_grid)
+
     def populate_grid(self, *_):
         """Fetches all workspaces and displays them as WorkspaceCard widgets."""
         try:
@@ -598,11 +987,14 @@ class WorkspaceScreen(Screen):
             print(f"ERROR in populate_grid: {e}\n{traceback.format_exc()}")
             App.get_running_app().show_toast(f"Error: {e}")
 
+
 class BoardScreen(Screen):
     """The screen that displays a single board with its lists and cards."""
+
     def on_enter(self, *_):
         """Called when the screen is entered. Loads the currently selected board."""
         self.load_current_board()
+
     def load_current_board(self, *_):
         """Loads the selected board from the current workspace and displays it."""
         app = App.get_running_app()
@@ -708,10 +1100,13 @@ class BoardScreen(Screen):
         self.manager.transition.direction = 'right'
         self.manager.current = 'workspaces'
 
+
 class BinScreen(Screen):
     """A screen to view and manage deleted items (lists and cards)."""
+
     def on_enter(self, *_):
         self.populate_bin()
+
     def populate_bin(self):
         """Fills the screen with items currently in the board's bin."""
         self.ids.bin_items_grid.clear_widgets()
@@ -783,6 +1178,7 @@ class BinScreen(Screen):
         self.manager.get_screen('board').load_current_board()
         self.manager.current = 'board'
 
+
 class DraggableListItem(BoxLayout):
     """A list item that can be dragged to reorder."""
     list_name = StringProperty('')
@@ -819,6 +1215,7 @@ class DraggableListItem(BoxLayout):
             return True
         return super().on_touch_up(touch)
 
+
 class RearrangeListsPopup(ModalView):
     """A popup for rearranging the order of lists on a board."""
     board = ObjectProperty(None)
@@ -839,53 +1236,87 @@ class RearrangeListsPopup(ModalView):
         if not self.board:
             self.dismiss()
             return
-            
+
         new_order_widgets = self.ids.lists_container.children[::-1]
         new_order_names = [widget.list_name for widget in new_order_widgets]
-        
+
         original_lists_map = {lst.name: lst for lst in self.board.list_objects()}
-        
+
         reordered_list_objects = [original_lists_map[name] for name in new_order_names if name in original_lists_map]
-        
+
         self.board._list_objects = reordered_list_objects
-        
+
         App.get_running_app().workspace_manager.save_current_workspace()
         self.board_screen.load_current_board()
         self.dismiss()
 
+
 class KanbanApp(App):
-    """The main application class."""
+    """
+    The main application class for the Kanban app.
+    
+    Handles:
+    - Application initialization
+    - Font setup
+    - UI setup
+    - Workspace and drag-drop management
+    """
+
     def build(self):
-        """Initializes the application, loads resources, and sets up the UI."""
+        """Initialize the application, load resources, and set up the UI."""
         self.workspace_manager = WorkspaceManager()
-        # The notification check has been removed
+        self.drag_drop_manager = DragDropManager()
+
+        self._setup_fonts()
+        self._setup_ui()
+
+        return self.sm
+
+    def _setup_fonts(self):
+        """Setup custom fonts with fallback to default if unavailable."""
         try:
-            # Register a custom font if available
-            LabelBase.register(name="NerdFont", fn_regular="NerdFont.ttf")
+            LabelBase.register(name=DEFAULT_FONT_NAME, fn_regular=FONT_FILE_PATH)
         except (OSError, IOError):
-            print("NerdFont not found. Using default font.")
-            LabelBase.register(name="NerdFont", fn_regular="Roboto") # Fallback font
-        Builder.load_file('app.kv') # Load the Kivy language file
+            print(f"{DEFAULT_FONT_NAME} not found. Using default font.")
+            LabelBase.register(name=DEFAULT_FONT_NAME, fn_regular=FALLBACK_FONT_NAME)
+
+    def _setup_ui(self):
+        """Setup the user interface and screen manager."""
+        Builder.load_file(KV_FILE_PATH)
         self.sm = ScreenManager(transition=SlideTransition())
-        # Set a global background color
+
+        self._setup_background()
+        self._add_screens()
+
+    def _setup_background(self):
+        """Setup the global background color."""
         with self.sm.canvas.before:
             Color(rgba=APP_COLORS['background'])
             self.background_rect = Rectangle(size=self.sm.size, pos=self.sm.pos)
         self.sm.bind(pos=self.update_background_rect, size=self.update_background_rect)
-        # Add all screens to the screen manager
-        self.sm.add_widget(WorkspaceScreen(name='workspaces'))
-        self.sm.add_widget(BoardScreen(name='board'))
-        self.sm.add_widget(BinScreen(name='bin_screen'))
-        return self.sm
+
+    def _add_screens(self):
+        """Add all screens to the screen manager."""
+        screens = [
+            WorkspaceScreen(name='workspaces'),
+            BoardScreen(name='board'),
+            BinScreen(name='bin_screen')
+        ]
+        for screen in screens:
+            self.sm.add_widget(screen)
 
     def update_background_rect(self, instance, value):
         """Updates the background rectangle's size and position when the window changes."""
         self.background_rect.pos = instance.pos
         self.background_rect.size = instance.size
+
     def show_toast(self, text):
         """A helper method to easily show a toast message."""
-        try: Toast(text=str(text)).open()
-        except Exception as e: print(f"--- FAILED TO CREATE TOAST ---\n{text}\n{e}\n{traceback.format_exc()}")
+        try:
+            Toast(text=str(text)).open()
+        except Exception as e:
+            print(f"--- FAILED TO CREATE TOAST ---\n{text}\n{e}\n{traceback.format_exc()}")
+
     def open_workspace(self, workspace_name):
         """Handles the logic for opening a workspace, including password prompts."""
         try:
@@ -897,6 +1328,7 @@ class KanbanApp(App):
         except Exception as e:
             self.show_toast(f"Error opening: {e}")
             print(traceback.format_exc())
+
     def open_workspace_callback(self, workspace_name, password):
         """Callback after the user enters a password to open a workspace."""
         try:
@@ -907,9 +1339,11 @@ class KanbanApp(App):
         except Exception as e:
             self.show_toast(f"Error with password: {e}")
             print(traceback.format_exc())
+
     def create_new_workspace(self):
         """Opens a popup to get a name for a new workspace."""
         TextInputPopup(title="Create Workspace", hint_text="Enter name", callback=self.create_workspace_callback).open()
+
     def create_workspace_callback(self, name):
         """Callback to create the new workspace."""
         try:
@@ -921,6 +1355,7 @@ class KanbanApp(App):
         except Exception as e:
             self.show_toast(f"Failed to create: {e}")
             print(traceback.format_exc())
+
     def delete_workspace(self, workspace_name):
         """Deletes a workspace."""
         try:
@@ -931,6 +1366,7 @@ class KanbanApp(App):
         except Exception as e:
             self.show_toast(f"Failed to delete: {e}")
             print(traceback.format_exc())
+
     def rename_workspace(self, old_name):
         """Initiates the workspace renaming process, checking for encryption first."""
         try:
@@ -941,6 +1377,7 @@ class KanbanApp(App):
         except Exception as e:
             self.show_toast(f"Error renaming: {e}")
             print(traceback.format_exc())
+
     def rename_password_check_callback(self, old_name, password):
         """Verifies password before allowing rename of an encrypted workspace."""
         try:
@@ -952,7 +1389,9 @@ class KanbanApp(App):
         except Exception as e:
             self.show_toast(f"Password check failed: {e}")
             print(traceback.format_exc())
+
     _RENAME_IN_PROGRESS = False # A simple lock to prevent race conditions
+
     def rename_workspace_callback(self, old_name, new_name, password=None):
         """The final callback that performs the workspace renaming."""
         if self._RENAME_IN_PROGRESS: return
@@ -968,6 +1407,7 @@ class KanbanApp(App):
             print(traceback.format_exc())
         finally:
             self._RENAME_IN_PROGRESS = False
+
     def set_workspace_password(self, workspace_name):
         """Initiates the process to set or change a workspace password."""
         try:
@@ -980,6 +1420,7 @@ class KanbanApp(App):
         except Exception as e:
             self.show_toast(f"Error: {e}")
             print(traceback.format_exc())
+
     def change_password_confirm_callback(self, workspace_name, current_password):
         """Verifies the current password before allowing a change."""
         try:
@@ -992,6 +1433,7 @@ class KanbanApp(App):
         except Exception as e:
             self.show_toast(f"Password confirmation failed: {e}")
             print(traceback.format_exc())
+
     def set_password_callback(self, workspace_name, password, is_new=False, current_password=None):
         """The final callback that actually sets/changes the password on the workspace data."""
         try:
@@ -1008,6 +1450,7 @@ class KanbanApp(App):
         except Exception as e:
             self.show_toast(f"Failed to set password: {e}")
             print(traceback.format_exc())
+
 
 if __name__ == '__main__':
     # Entry point of the application

@@ -3,6 +3,10 @@
 
 #:set NERD_FONT "NerdFont"
 
+# ===========================
+# BASIC UI COMPONENTS
+# ===========================
+
 # A custom toast notification widget.
 <Toast>:
     background_color: 0, 0, 0, 0
@@ -41,6 +45,10 @@
             pos: self.pos
             size: self.size
             radius: [dp(8),]
+
+# ===========================
+# DIALOG & POPUP COMPONENTS
+# ===========================
 
 # A popup for getting text input from the user.
 <TextInputPopup>:
@@ -89,37 +97,9 @@
                     size: self.size
                     radius: [dp(24),]
 
-# A popup that shows a list of lists to move a card to.
-<MoveCardPopup>:
-    background_color: 0, 0, 0, .5
-    size_hint: 0.85, 0.6
-    BoxLayout:
-        orientation: 'vertical'
-        padding: '15dp'
-        spacing: '10dp'
-        size_hint: 1, 1
-        pos_hint: {'center_x': .5, 'center_y': .5}
-        canvas.before:
-            Color:
-                rgba: APP_COLORS['white']
-            RoundedRectangle:
-                pos: self.pos
-                size: self.size
-                radius: [dp(15),]
-        Label:
-            text: "Move Card To..."
-            font_size: '20sp'
-            size_hint_y: None
-            height: '40dp'
-            bold: True
-            color: APP_COLORS['text']
-        ScrollView:
-            GridLayout:
-                id: list_container
-                cols: 1
-                size_hint_y: None
-                height: self.minimum_height
-                spacing: '5dp'
+# ===========================
+# CARD CONTEXT MENU
+# ===========================
 
 # A context menu for a card, providing options like edit, move, delete.
 <CardContextMenu>:
@@ -156,10 +136,6 @@
             on_press: root.set_priority()
             # Disable this button if the card is in a completed list
             disabled: root.card_widget.is_in_completed_list
-        DialogButton:
-            id: move_button
-            text: "Move"
-            on_press: root.move_card()
         DialogButton:
             text: "Move to Bin"
             color: APP_COLORS['red']
@@ -449,6 +425,10 @@
             background_color: 0,0,0,0
             color: APP_COLORS['primary']
 
+# ===========================
+# BOARD & CARD COMPONENTS
+# ===========================
+
 # The visual representation of a single workspace on the workspace screen.
 <WorkspaceCard>:
     orientation: 'vertical'
@@ -631,6 +611,10 @@
                 size: self.size
                 radius: [dp(8),]
 
+
+# ===========================
+# MAIN SCREENS
+# ===========================
 
 # The screen that displays all available workspaces.
 <WorkspaceScreen>:
@@ -1144,3 +1128,17 @@
                         pos: self.pos
                         size: self.size
                         radius: [dp(24),]
+
+# ===========================
+# DRAG AND DROP COMPONENTS
+# ===========================
+
+# Visual indicator for drag and drop operations
+<DragDropIndicator>:
+    padding: [0, dp(5)] # Add padding to the top and bottom
+    canvas.before:
+        Color:
+            rgba: APP_COLORS['primary'] + [1.0]
+        Rectangle:
+            pos: self.x, self.center_y - dp(1.5)
+            size: self.width, dp(3)
